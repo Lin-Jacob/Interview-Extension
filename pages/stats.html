@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prep Stats</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    :root {
+      --s-leetcode: #2a78d6; --s-design: #eb6834; --s-behavioral: #1baf7a;
+      --heat-0: #ece9e2; --heat-1: #b7d3f6; --heat-2: #6da7ec; --heat-3: #2a78d6; --heat-4: #184f95;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --s-leetcode: #3987e5; --s-design: #d95926; --s-behavioral: #199e70;
+        --heat-0: #2c2c31; --heat-1: #184f95; --heat-2: #256abf; --heat-3: #3987e5; --heat-4: #86b6ef;
+      }
+    }
+    .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+    .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+    .tile .label { font-size: 12px; color: var(--muted); }
+    .tile .value { font-size: 28px; font-weight: 700; line-height: 1.2; margin-top: 2px; }
+    .tile .sub { font-size: 12px; color: var(--muted); }
+    .cal-scroll { overflow-x: auto; padding-bottom: 4px; }
+    svg text { fill: var(--muted); font: 11px system-ui, sans-serif; }
+    .legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+    .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+    #tip { position: fixed; pointer-events: none; background: var(--card); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.15); display: none; z-index: 10; max-width: 240px; }
+    .hbar { display: grid; grid-template-columns: 170px 1fr 36px; gap: 8px; align-items: center; font-size: 13px; margin: 5px 0; }
+    .hbar .track { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
+    .hbar .fill { height: 100%; border-radius: 99px; background: var(--s-leetcode); }
+    .hbar .n { text-align: right; color: var(--muted); }
+    @media (max-width: 600px) { .tiles { grid-template-columns: repeat(2, 1fr); } .hbar { grid-template-columns: 110px 1fr 30px; } }
+    .motivation { font-size: 15px; margin-top: 10px; }
+    td .swatch { margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <div><h1>Your prep</h1><div id="motivation" class="motivation muted"></div></div>
+      <div class="spacer"></div>
+      <a href="dashboard.html">Dashboard</a>
+    </div>
+    <div id="tiles" class="tiles"></div>
+
+    <div class="card">
+      <h2>Practice calendar</h2>
+      <div class="cal-scroll"><svg id="calendar" role="img" aria-label="Calendar of practice activity for the last 26 weeks"></svg></div>
+      <div class="legend">
+        <span>Less</span>
+        <span><span class="swatch" style="background:var(--heat-0)"></span></span>
+        <span><span class="swatch" style="background:var(--heat-1)"></span></span>
+        <span><span class="swatch" style="background:var(--heat-2)"></span></span>
+        <span><span class="swatch" style="background:var(--heat-3)"></span></span>
+        <span><span class="swatch" style="background:var(--heat-4)"></span>More</span>
+        <span style="margin-left:12px">Outlined days: daily goal met</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Activity per week</h2>
+      <svg id="weekly" role="img" aria-label="Activities per week for the last 12 weeks, by type" style="width:100%"></svg>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--s-leetcode)"></span>LeetCode</span>
+        <span><span class="swatch" style="background:var(--s-design)"></span>System design</span>
+        <span><span class="swatch" style="background:var(--s-behavioral)"></span>Behavioral</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>LeetCode by difficulty</h2>
+      <div id="difficulty"></div>
+      <h2 style="margin-top:18px">Problems solved by topic</h2>
+      <div id="topics"></div>
+    </div>
+
+    <div class="card">
+      <h2>History</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>When</th><th>Type</th><th>What</th><th>Result</th></tr></thead>
+          <tbody id="history"></tbody>
+        </table>
+      </div>
+      <button id="more" class="secondary" style="margin-top:10px;display:none">Show all</button>
+    </div>
+  </div>
+  <div id="tip"></div>
+  <script src="../lib/topics.js"></script>
+  <script src="common.js"></script>
+  <script src="stats.js"></script>
+</body>
+</html>

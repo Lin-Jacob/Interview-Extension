@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solve first</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap" style="max-width:560px; padding-top:10vh">
+    <h1>Solve first, scroll later.</h1>
+    <p class="muted"><span id="site"></span> is blocked until you finish today's task.</p>
+    <div class="card">
+      <div class="row">
+        <div id="progress" class="progress">…</div>
+        <div class="spacer"></div>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+      <div id="status" class="muted small"></div>
+      <h2 style="margin-top:14px">Today</h2>
+      <ul id="picks" class="picks"></ul>
+    </div>
+  </div>
+  <script src="common.js"></script>
+  <script src="blocked.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "interview-extension",
+  "private": true,
+  "description": "Firefox extension that blocks distracting sites until today's interview prep is done.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "web-ext lint --self-hosted --source-dir . --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts",
+    "build": "web-ext build --source-dir . --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts --artifacts-dir dist --overwrite-dest"
+  },
+  "devDependencies": {
+    "web-ext": "10.8.0"
+  }
+}

@@ -1,0 +1,55 @@
+.lcdl-fab {
+  position: fixed; right: 20px; bottom: 20px; z-index: 2147483000;
+  background: #d97757; color: #fff; border: 0; border-radius: 999px;
+  padding: 10px 16px; font: 600 14px/1 system-ui, sans-serif; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+}
+.lcdl-fab:hover { background: #c4633f; }
+.lcdl-panel {
+  position: fixed; right: 20px; bottom: 70px; z-index: 2147483000;
+  width: min(420px, calc(100vw - 40px)); max-height: min(640px, calc(100vh - 100px));
+  display: none; flex-direction: column; gap: 8px;
+  background: #1e1e1e; color: #eee; border: 1px solid #3a3a3a; border-radius: 12px;
+  padding: 12px; font: 14px/1.5 system-ui, sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+}
+.lcdl-panel.lcdl-open { display: flex; }
+.lcdl-header { display: flex; align-items: center; gap: 8px; }
+.lcdl-count { margin-left: auto; color: #aaa; font-size: 12px; }
+.lcdl-close { background: none; border: 0; color: #aaa; font-size: 20px; cursor: pointer; line-height: 1; }
+.lcdl-log { overflow-y: auto; flex: 1; min-height: 80px; display: flex; flex-direction: column; gap: 8px; }
+.lcdl-msg { border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+.lcdl-user { background: #2d3a4a; align-self: flex-end; max-width: 85%; white-space: pre-wrap; }
+.lcdl-assistant { background: #2a2a2a; }
+.lcdl-assistant p { margin: 0 0 6px; }
+.lcdl-assistant ul, .lcdl-assistant ol { margin: 0 0 6px; padding-left: 20px; }
+.lcdl-assistant h4 { margin: 6px 0 4px; font-size: 14px; }
+.lcdl-assistant pre { background: #111; padding: 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+.lcdl-assistant code { font: 12.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #111; padding: 1px 4px; border-radius: 4px; }
+.lcdl-assistant pre code { padding: 0; background: none; }
+.lcdl-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #d97757; margin-bottom: 4px; }
+.lcdl-pending { color: #aaa; font-style: italic; }
+.lcdl-error { background: #4a2020; color: #ffb4b4; }
+.lcdl-muted { color: #aaa; margin: 0; }
+.lcdl-actions, .lcdl-ask { display: flex; gap: 8px; }
+.lcdl-btn {
+  background: #3a3a3a; color: #fff; border: 0; border-radius: 8px; padding: 8px 12px;
+  font: 600 13px system-ui, sans-serif; cursor: pointer; flex: 1;
+}
+.lcdl-btn:hover:not(:disabled) { background: #4a4a4a; }
+.lcdl-btn:disabled { opacity: .45; cursor: not-allowed; }
+.lcdl-danger:not(:disabled) { background: #8a3b2a; }
+.lcdl-ask .lcdl-btn { flex: 0 0 auto; }
+.lcdl-input {
+  flex: 1; resize: vertical; background: #111; color: #eee; border: 1px solid #3a3a3a;
+  border-radius: 8px; padding: 6px 8px; font: 13px system-ui, sans-serif;
+}
+.lcdl-check { font-size: 12px; color: #aaa; display: flex; align-items: center; gap: 4px; }
+.lcdl-note { font-size: 12px; background: #3a3220; padding: 6px 8px; border-radius: 6px; }
+.lcdl-note a { color: #f0b47a; }
+.lcdl-good { background: #1f3a24; color: #9be5a6; }
+.lcdl-toast {
+  position: fixed; left: 50%; top: 20px; transform: translateX(-50%); z-index: 2147483001;
+  background: #2e7d32; color: #fff; padding: 10px 16px; border-radius: 8px; font: 600 14px system-ui, sans-serif;
+}
+.lcdl-notice { background: #2d3a2d; color: #cfe8cf; }
+.lcdl-link { display: block; margin-top: 6px; background: none; border: 0; padding: 0; color: #f0b47a; text-decoration: underline; cursor: pointer; font: inherit; }

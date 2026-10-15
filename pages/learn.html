@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily Lesson</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .lesson { font-size: 15px; line-height: 1.65; }
+    .lesson h4 { font-size: 16px; margin: 18px 0 6px; }
+    .lesson pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+    .lesson code { font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; }
+    .lesson p code, .lesson li code { background: var(--bar); padding: 1px 4px; border-radius: 4px; }
+    .q { margin-top: 18px; }
+    .q .prompt { font-weight: 600; }
+    .answer-box, .q textarea { min-height: 90px; font-family: system-ui, sans-serif; font-size: 14px; }
+    .result { border-left: 3px solid var(--border); padding: 6px 0 6px 12px; margin-top: 8px; }
+    .score { font-weight: 700; }
+    .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--bar); color: var(--muted); }
+    .loading { color: var(--muted); font-style: italic; }
+    .answer-box { min-height: 220px !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap" style="max-width:760px">
+    <div class="row">
+      <a href="dashboard.html">← Dashboard</a>
+      <div class="spacer"></div>
+      <a href="stats.html">Stats</a>
+    </div>
+    <div id="root"></div>
+  </div>
+  <script src="../lib/markdown.js"></script>
+  <script src="common.js"></script>
+  <script src="learn.js"></script>
+</body>
+</html>

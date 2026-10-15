@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strengths Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <h1>Interview prep</h1>
+        <div id="sync" class="muted small"></div>
+      </div>
+      <div class="spacer"></div>
+      <button id="refresh" class="secondary">Sync LeetCode history</button>
+      <a href="stats.html">Stats</a>
+      <a href="learn.html?type=design">Lessons</a>
+      <a href="learn.html?type=behavioral">Behavioral</a>
+      <a href="options.html">Settings</a>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <h2 style="margin:0">Today</h2>
+        <div class="spacer"></div>
+        <div id="progress" class="progress" style="font-size:20px"></div>
+      </div>
+      <div id="ramp" class="muted small"></div>
+      <ul id="picks" class="picks" style="margin-top:10px"></ul>
+    </div>
+
+    <div class="card" id="assessment"></div>
+
+    <div class="card">
+      <h2>Topics, weakest first</h2>
+      <p class="muted small">Strength blends how many problems you've solved on LeetCode in each topic with how you've done here: solving without hints scores highest, each hint lowers it, and revealing the solution scores zero.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Topic</th><th class="hide-sm">Solved on LeetCode</th><th class="hide-sm">Practice here</th><th>Strength</th><th></th></tr></thead>
+          <tbody id="topics"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent attempts</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Problem</th><th class="hide-sm">Topic</th><th>Hints</th><th>Result</th></tr></thead>
+          <tbody id="attempts"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script src="../lib/topics.js"></script>
+  <script src="../lib/core.js"></script>
+  <script src="common.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "LeetCode Daily Lock",
+  "version": "1.5.1",
+  "description": "Blocks distracting sites until you solve your daily LeetCode problems. Tracks weak topics and gives Claude-powered hints.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "leetcode-daily-lock@lin-jacob",
+      "update_url": "https://github.com/Lin-Jacob/Interview-Extension/releases/latest/download/updates.json",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": [
+          "websiteContent"
+        ]
+      }
+    }
+  },
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "webNavigation",
+    "cookies",
+    "clipboardWrite",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "https://api.anthropic.com/*"
+  ],
+  "background": {
+    "scripts": [
+      "lib/topics.js",
+      "lib/curriculum.js",
+      "lib/core.js",
+      "lib/leetcode.js",
+      "lib/claude.js",
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_title": "LeetCode Daily Lock",
+    "default_popup": "pages/popup.html",
+    "default_icon": {
+      "48": "icons/icon-48.png",
+      "96": "icons/icon-96.png"
+    }
+  },
+  "options_ui": {
+    "page": "pages/options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://leetcode.com/problems/*"
+      ],
+      "js": [
+        "lib/markdown.js",
+        "content/leetcode.js"
+      ],
+      "css": [
+        "content/leetcode.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

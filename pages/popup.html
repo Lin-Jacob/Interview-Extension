@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LeetCode Daily Lock</title>
+  <link rel="stylesheet" href="style.css">
+  <style>body { width: 360px; } .wrap { padding: 14px; } .card { margin-top: 12px; padding: 12px; }</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <div class="muted small">Today</div>
+        <div id="progress" class="progress">…</div>
+      </div>
+      <div class="spacer"></div>
+      <button id="refresh" class="secondary">Refresh</button>
+    </div>
+    <div id="status" class="muted small"></div>
+    <div class="card">
+      <h2>Today</h2>
+      <div id="ramp" class="muted small" style="margin:-6px 0 8px"></div>
+      <ul id="picks" class="picks"></ul>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <a class="btn" href="dashboard.html" target="_blank">Dashboard</a>
+      <a class="btn" href="stats.html" target="_blank">Stats</a>
+      <div class="spacer"></div>
+      <a href="options.html" target="_blank">Settings</a>
+    </div>
+  </div>
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily Lock Settings</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap" style="max-width:640px">
+    <h1>LeetCode Daily Lock</h1>
+    <p class="muted">Sites stay blocked each day until today's task is done: a LeetCode problem, a SQL problem, a system design lesson and quiz, or a behavioral question, depending on the weekday. Sign in to leetcode.com in this browser so solves are detected automatically.</p>
+
+    <div id="perm" class="card" hidden>
+      <h2>One more step</h2>
+      <p>Firefox needs your OK for the extension to read your LeetCode progress and reach the Claude API.</p>
+      <button id="grant">Allow access</button>
+    </div>
+
+    <form id="form" class="card">
+      <label class="field">LeetCode username
+        <span class="hint">Leave blank to use whoever is signed in to leetcode.com.</span>
+        <input type="text" id="username" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="field">Daily task by weekday
+        <span class="hint" style="display:block;font-weight:400;color:var(--muted);font-size:12px">Each day has one task. Sites unlock once it's done.</span>
+        <div id="schedule" class="row" style="margin-top:6px"></div>
+      </div>
+      <label class="field">LeetCode problems on LeetCode days
+        <input type="number" id="dailyGoal" min="1" max="10">
+      </label>
+      <label class="row" style="margin-top:14px">
+        <input type="checkbox" id="rampUp">
+        <span style="flex:1">Warm-up: start with Easy problems and slowly add harder ones over about 6 weeks</span>
+      </label>
+      <p class="small muted" style="margin:4px 0 0 24px">Week 1 is Easy only. Mediums come in gradually from week 2, and Hards only after day 42. Days count only when you hit your goal. Turning this off and on again restarts it.</p>
+      <label class="field">Blocked sites
+        <span class="hint">One per line. Subdomains are included (youtube.com also blocks m.youtube.com).</span>
+        <textarea id="blockedSites" spellcheck="false"></textarea>
+      </label>
+
+      <h2 style="margin-top:24px">Claude help</h2>
+      <label class="field">How hints reach Claude
+        <select id="helpMode">
+          <option value="claudecode">Claude Code on this computer: answers in the panel (uses your Pro plan)</option>
+          <option value="claudeai">Open claude.ai and paste the prompt (uses your Pro plan)</option>
+          <option value="api">Answer in the panel using an API key (pay per use)</option>
+        </select>
+      </label>
+      <div id="bridgeFields" class="card" style="background:var(--bg)">
+        <strong>One-time setup for Claude Code</strong>
+        <ol class="small" style="margin:8px 0; padding-left:20px">
+          <li>Install Claude Code from <a href="https://claude.com/claude-code" target="_blank">claude.com/claude-code</a>, run <code>claude</code> in a terminal once, and sign in with your Pro account.</li>
+          <li>Unzip <code>leetcode-daily-lock-bridge.zip</code> and run <code>node install.js</code> inside it (needs Node.js 18 or newer).</li>
+          <li>Restart Firefox, then click Test connection.</li>
+        </ol>
+        <div class="row">
+          <button type="button" id="testBridge" class="secondary">Test connection</button>
+          <span id="bridgeStatus" class="small muted"></span>
+        </div>
+      </div>
+      <div id="apiFields">
+      <label class="field">Claude API key
+        <span class="hint">From console.anthropic.com. Stored only in this browser and sent only to api.anthropic.com.</span>
+        <input type="password" id="apiKey" autocomplete="off" placeholder="sk-ant-...">
+      </label>
+      <label class="field">Model
+        <select id="model">
+          <option value="claude-opus-5-5">Claude Opus 5.5 (best hints)</option>
+          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (cheaper)</option>
+          <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
+        </select>
+      </label>
+      </div>
+      <label class="field">Hints before the solution unlocks
+        <input type="number" id="hintsBeforeSolution" min="1" max="10">
+      </label>
+      <label class="row" style="margin-top:14px">
+        <input type="checkbox" id="countRevealedSolutions">
+        <span style="flex:1">Count problems toward the daily goal even if I revealed the solution</span>
+      </label>
+
+      <div class="row" style="margin-top:20px">
+        <button type="submit">Save</button>
+        <span id="saved" class="muted small"></span>
+      </div>
+    </form>
+  </div>
+  <script src="common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

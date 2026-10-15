@@ -1,0 +1,74 @@
+name: Test, sign and release
+
+# Every push to main is tested. When manifest.json has a version that hasn't
+# been released yet, it's signed on AMO (unlisted) and published as a GitHub
+# release; installed copies of the extension pick it up from updates.json.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+
+  release:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Check whether this version needs a release
+        id: check
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already released; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$AMO_JWT_ISSUER" ] || [ -z "$AMO_JWT_SECRET" ]; then
+            echo "::warning::Add the AMO_JWT_ISSUER and AMO_JWT_SECRET repository secrets to sign releases."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign on addons.mozilla.org (unlisted)
+        if: steps.check.outputs.skip != 'true'
+        run: >
+          npx web-ext sign --channel unlisted --source-dir .
+          --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+          --artifacts-dir web-ext-artifacts --approval-timeout 1800000
+          --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts
+
+      - name: Publish the release
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          version=${{ steps.check.outputs.version }}
+          xpi="interview-extension-$version.xpi"
+          mv web-ext-artifacts/*.xpi "$xpi"
+          node scripts/updates-json.js "$xpi" > updates.json
+          (cd native && zip -q ../leetcode-daily-lock-bridge.zip host.js install.js README.txt)
+          gh release create "v$version" "$xpi" updates.json leetcode-daily-lock-bridge.zip \
+            --title "v$version" --notes "Signed build $version. Firefox installs it automatically; to install by hand, open $xpi in Firefox."
