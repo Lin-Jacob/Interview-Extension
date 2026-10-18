@@ -47,7 +47,7 @@ into, and **API key** answers in the panel and is billed per use.
   aggregates, grouping, subqueries, string functions). The Ask Claude tutor works on them too.
 - **System design lessons:** 49 lessons in order, from how the web works through caching, databases,
   SQL, schema design, query performance, queues and consistency to case studies (URL shortener, chat, news feed, payments) and team practices.
-  Claude writes each one (500–800 words) with 3 quiz questions; you type answers and Claude grades them.
+  Claude writes each one as a short 2–3 minute reading with 3 quiz questions; you type answers and Claude grades them.
   Lessons under 60% come back for review a week later.
 - **Behavioral practice:** 30 questions, including communication ones like "explain a hash map to a
   non-engineer". Claude scores your answer out of 10, lists what worked and what to improve, and rewrites

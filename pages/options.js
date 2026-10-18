@@ -51,6 +51,7 @@ function fill(st) {
   $("hintsBeforeSolution").value = s.hintsBeforeSolution;
   $("countRevealedSolutions").checked = !!s.countRevealedSolutions;
   $("rampUp").checked = !!s.rampUp;
+  $("autocomplete").checked = s.autocomplete !== false;
 }
 
 $("form").addEventListener("submit", async (e) => {
@@ -64,7 +65,8 @@ $("form").addEventListener("submit", async (e) => {
     helpMode: $("helpMode").value,
     hintsBeforeSolution: Number($("hintsBeforeSolution").value),
     countRevealedSolutions: $("countRevealedSolutions").checked,
-    rampUp: $("rampUp").checked
+    rampUp: $("rampUp").checked,
+    autocomplete: $("autocomplete").checked
   };
   const key = $("apiKey").value.trim();
   if (key) settings.apiKey = key;

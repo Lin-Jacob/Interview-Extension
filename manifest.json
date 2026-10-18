@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LeetCode Daily Lock",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Blocks distracting sites until you solve your daily LeetCode problems. Tracks weak topics and gives Claude-powered hints.",
   "browser_specific_settings": {
     "gecko": {
@@ -67,6 +67,16 @@
         "content/leetcode.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://leetcode.com/problems/*"
+      ],
+      "js": [
+        "content/autocomplete.js"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ]
 }

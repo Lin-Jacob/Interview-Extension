@@ -51,6 +51,17 @@
     return { code: lines ? lines.innerText : "", language: "" };
   }
 
+  // ---------- autocomplete setting ----------
+  // content/autocomplete.js runs in the page and reads this attribute.
+
+  function applyAutocomplete(settings) {
+    document.documentElement.setAttribute("data-lcdl-autocomplete", settings && settings.autocomplete === false ? "off" : "on");
+  }
+  browser.storage.local.get({ settings: {} }).then(({ settings }) => applyAutocomplete(settings)).catch(() => {});
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.settings) applyAutocomplete(changes.settings.newValue);
+  });
+
   // ---------- accepted detection ----------
 
   document.addEventListener("click", (e) => {

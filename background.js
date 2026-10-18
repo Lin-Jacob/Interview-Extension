@@ -652,7 +652,7 @@ async function generateLesson({ id, review }) {
     prompt: [
       `Write today's lesson: "${lesson.title}". Cover: ${lesson.points}.`,
       review ? "This is a review: the student scored low on this topic before, so explain the core ideas differently and more simply." : "",
-      "This is a reading the student studies before a quiz, so teach the topic properly: 900-1300 words of Markdown (about a 5-7 minute read). Open with why the topic matters, then explain the core ideas with ## section headings, define key terms the first time they appear, include one real-world example (a named company or product is fine) and a small ASCII diagram in a code block if it helps, cover the main trade-offs, and add a short \"In an interview\" section on how this topic comes up and what a strong candidate says. End with a \"Key takeaways\" list of 3-5 bullets.",
+      "This is a short reading the student studies before a quiz: 350-550 words of Markdown (about a 2-3 minute read). Keep it tight: one or two sentences on why the topic matters, then the core ideas under 2-3 short ## headings (define key terms the first time they appear), one concrete real-world example (a named company or product is fine), a tiny ASCII diagram in a code block only if it really helps, a 2-3 sentence \"In an interview\" section, and a \"Key takeaways\" list of 3 bullets. Skip anything that isn't essential.",
       "Then write 3 quiz questions answerable from the reading in a few sentences: one checks understanding, one applies the idea to a scenario, one asks about a trade-off.",
       "Respond with only a JSON object and no code fences: {\"body\": \"<the lesson in Markdown>\", \"questions\": [\"...\", \"...\", \"...\"]}"
     ].filter(Boolean).join("\n\n")
