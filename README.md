@@ -68,6 +68,12 @@ into, and **API key** answers in the panel and is billed per use.
 - **Strengths:** each topic's score blends LeetCode history with how you do here: a clean solve scores
   100%, each hint costs 12%, a revealed solution scores 0. After the assessment, daily picks target your
   weakest topics at a matching difficulty (Easy below 35%, Medium below 70%, Hard above).
+- **IntelliSense in LeetCode's editor:** a VS Code-style suggestion list with the selected suggestion
+  previewed as ghost text (Tab or Enter accepts, arrows move, Esc dismisses, Ctrl+Space asks). It reads
+  your code to know classes, fields and methods (including LeetCode's commented-out ListNode/TreeNode
+  definitions) and variable types, so `node.` after `node = queue.popleft()` lists `val`, `left`, `right`.
+  Works for Python, Java, C++, JavaScript/TypeScript and SQL (table and column names from the problem).
+  Turn it off in settings.
 - **Claude tutor:** "Ask Claude" on any problem page. Hints get more specific each time and see your
   current code; after 5 hints the **Show solution** button unlocks. You can also ask free-form questions.
   By default a problem whose solution you revealed doesn't count toward the daily goal (changeable in settings).
