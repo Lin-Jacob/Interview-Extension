@@ -3,6 +3,12 @@
 const ORIGINS = { origins: ["https://leetcode.com/*", "https://api.anthropic.com/*"] };
 const $ = (id) => document.getElementById(id);
 
+try {
+  const v = browser.runtime.getManifest().version;
+  $("version").textContent = `v${v}`;
+  document.title = `Daily Lock Settings (v${v})`;
+} catch { /* not running as an extension */ }
+
 async function checkPermissions() {
   const ok = await browser.permissions.contains(ORIGINS);
   $("perm").hidden = ok;

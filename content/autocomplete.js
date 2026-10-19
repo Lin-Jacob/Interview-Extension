@@ -1,9 +1,14 @@
-// Runs in the page's own JavaScript world on LeetCode problem pages (manifest
-// "world": "MAIN") so it can reach LeetCode's Monaco editor. Turns on
-// suggestions as you type and adds each language's keywords, common library
-// names and a few snippets, on top of Monaco's suggestions from words already
-// in the file. The extension's content script sets
-// <html data-lcdl-autocomplete="on|off"> from the settings.
+// Autocomplete for LeetCode's code editor. Runs in the page's own JavaScript
+// world (manifest "world": "MAIN").
+//
+// If LeetCode exposes its Monaco editor as window.monaco, this turns on
+// Monaco's own suggestions and adds each language's keywords, library names
+// and snippets. LeetCode usually doesn't expose it, so otherwise this shows its
+// own suggestion box: it tracks the word being typed in the editor, suggests
+// keywords plus words already in your code, and types the rest of the word into
+// the editor when you press Tab or Enter.
+//
+// The extension's content script sets <html data-lcdl-autocomplete="on|off">.
 (function () {
   const ATTR = "data-lcdl-autocomplete";
   const words = (s) => s.split(/\s+/).filter(Boolean);
@@ -80,8 +85,12 @@
     }
   };
 
+  const enabled = () => document.documentElement.getAttribute(ATTR) !== "off";
+
+  // ---------- Monaco API (when window.monaco exists) ----------
+
   const registered = new Set();
-  const configured = new WeakSet();
+  const configured = new WeakMap();
 
   function register(monaco) {
     const { CompletionItemKind, CompletionItemInsertTextRule } = monaco.languages;
@@ -91,7 +100,7 @@
         registered.add(id);
         monaco.languages.registerCompletionItemProvider(id, {
           provideCompletionItems(model, position) {
-            if (document.documentElement.getAttribute(ATTR) === "off") return { suggestions: [] };
+            if (!enabled()) return { suggestions: [] };
             const w = model.getWordUntilPosition(position);
             const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: w.startColumn, endColumn: w.endColumn };
             const kw = lang.words.map((label) => ({ label, kind: CompletionItemKind.Keyword, insertText: label, range }));
@@ -106,26 +115,142 @@
     }
   }
 
-  function tick() {
+  function useMonacoApi() {
     const monaco = window.monaco;
-    if (!monaco || !monaco.editor || !monaco.languages) return;
-    const on = document.documentElement.getAttribute(ATTR) !== "off";
-    try { register(monaco); } catch (e) { /* older Monaco: keep the options at least */ }
-    const editors = monaco.editor.getEditors ? monaco.editor.getEditors() : [];
-    for (const ed of editors) {
-      const want = on ? "on" : "off";
-      if (configured.has(ed) && ed.__lcdlAuto === want) continue;
-      ed.updateOptions(on
+    if (!monaco || !monaco.editor || !monaco.languages || !monaco.editor.getEditors) return false;
+    try { register(monaco); } catch { /* keep going with the options */ }
+    const want = enabled() ? "on" : "off";
+    for (const ed of monaco.editor.getEditors()) {
+      if (configured.get(ed) === want) continue;
+      ed.updateOptions(want === "on"
         ? { quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true,
             wordBasedSuggestions: "allDocuments", acceptSuggestionOnEnter: "smart", tabCompletion: "on", snippetSuggestions: "inline" }
         : { quickSuggestions: false, suggestOnTriggerCharacters: false, wordBasedSuggestions: "off" });
-      configured.add(ed);
-      ed.__lcdlAuto = want;
+      configured.set(ed, want);
     }
+    return true;
   }
 
+  // ---------- fallback: our own suggestion box ----------
+
+  const WORD_CHAR = /^[A-Za-z0-9_]$/;
+  let prefix = "";
+  let items = [];
+  let active = 0;
+  let box = null;
+
+  function editorRoot(node) { return node && node.closest ? node.closest(".monaco-editor") : null; }
+
+  function detectLang(root) {
+    // LeetCode's language picker shows the name (e.g. "Python3", "C++", "MySQL").
+    const label = [...document.querySelectorAll("button")].map((b) => b.textContent.trim())
+      .find((t) => /^(Python3?|Java|C\+\+|C|JavaScript|TypeScript|MySQL|MS SQL Server|Oracle|PostgreSQL|Pandas)$/i.test(t)) || "";
+    if (/sql|oracle/i.test(label)) return LANGS.sql;
+    if (/python|pandas/i.test(label)) return LANGS.python;
+    if (/^java$/i.test(label)) return LANGS.java;
+    if (/c\+\+|^c$/i.test(label)) return LANGS.cpp;
+    if (/script/i.test(label)) return LANGS.javascript;
+    const code = codeText(root);
+    if (/\bdef |self\b/.test(code)) return LANGS.python;
+    if (/#include|vector</.test(code)) return LANGS.cpp;
+    if (/public (class|int|boolean|String)/.test(code)) return LANGS.java;
+    if (/\b(SELECT|FROM)\b/i.test(code)) return LANGS.sql;
+    return LANGS.javascript;
+  }
+
+  function codeText(root) {
+    const lines = root && root.querySelector(".view-lines");
+    return lines ? lines.textContent.replace(/\u00a0/g, " ") : "";
+  }
+
+  function candidates(root) {
+    const lang = detectLang(root);
+    const fromCode = codeText(root).split(/[^A-Za-z0-9_]+/).filter((w) => w.length >= 3);
+    const seen = new Set();
+    const out = [];
+    const p = prefix.toLowerCase();
+    for (const w of [...fromCode, ...lang.words]) {
+      if (seen.has(w) || w === prefix || !w.toLowerCase().startsWith(p)) continue;
+      seen.add(w);
+      out.push(w);
+    }
+    // Shorter and exact-case matches first, words from your code before keywords of equal length.
+    return out.sort((a, b) => (b.startsWith(prefix) - a.startsWith(prefix)) || a.length - b.length).slice(0, 8);
+  }
+
+  function hide() { if (box) box.style.display = "none"; items = []; }
+
+  function show(root) {
+    items = prefix.length >= 2 ? candidates(root) : [];
+    if (!items.length) return hide();
+    active = Math.min(active, items.length - 1);
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "lcdl-suggest";
+      Object.assign(box.style, {
+        position: "fixed", zIndex: 2147483647, minWidth: "160px", maxWidth: "320px", padding: "4px 0",
+        background: "#252526", color: "#d4d4d4", border: "1px solid #454545", borderRadius: "6px",
+        font: "13px/1.5 Menlo, Consolas, monospace", boxShadow: "0 4px 14px rgba(0,0,0,.35)"
+      });
+      box.addEventListener("mousedown", (e) => {
+        const row = e.target.closest("[data-i]");
+        if (row) { e.preventDefault(); active = Number(row.dataset.i); accept(); }
+      });
+      document.body.append(box);
+    }
+    box.replaceChildren(...items.map((w, i) => {
+      const row = document.createElement("div");
+      row.dataset.i = i;
+      Object.assign(row.style, { padding: "1px 10px", cursor: "pointer", background: i === active ? "#04395e" : "transparent", whiteSpace: "nowrap" });
+      const b = document.createElement("b");
+      b.textContent = w.slice(0, prefix.length);
+      b.style.color = "#4fc1ff";
+      row.append(b, w.slice(prefix.length));
+      return row;
+    }));
+    const cursor = root.querySelector(".cursors-layer .cursor") || root.querySelector(".cursor");
+    const r = (cursor || root).getBoundingClientRect();
+    box.style.left = `${Math.min(r.left, window.innerWidth - 330)}px`;
+    box.style.top = `${r.bottom + 2}px`;
+    box.style.display = "block";
+  }
+
+  function accept() {
+    const word = items[active];
+    const rest = word ? word.slice(prefix.length) : "";
+    hide();
+    prefix = "";
+    // Typing into Monaco's hidden input area lets the editor handle it like real typing.
+    if (rest) document.execCommand("insertText", false, rest);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    const root = editorRoot(e.target);
+    if (!root || !enabled() || usingApi) return;
+    const open = box && box.style.display === "block" && items.length;
+    if (open && (e.key === "Tab" || e.key === "Enter")) { e.preventDefault(); e.stopImmediatePropagation(); accept(); return; }
+    if (open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      active = (active + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      show(root);
+      return;
+    }
+    if (open && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); hide(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) { prefix = ""; hide(); return; }
+    if (e.key.length === 1 && WORD_CHAR.test(e.key)) { prefix += e.key; active = 0; setTimeout(() => show(root), 0); return; }
+    if (e.key === "Backspace" && prefix) { prefix = prefix.slice(0, -1); active = 0; setTimeout(() => show(root), 0); return; }
+    if (e.key === "Shift" || e.key === "CapsLock") return;
+    prefix = "";
+    hide();
+  }, true);
+  document.addEventListener("mousedown", (e) => { if (!box || !box.contains(e.target)) { prefix = ""; hide(); } }, true);
+
+  // ---------- start ----------
+
   // LeetCode builds its editor after the page loads and rebuilds it when you
-  // switch problems or languages, so keep checking.
+  // switch problems or languages, so keep checking for the Monaco API.
+  let usingApi = false;
+  function tick() { usingApi = useMonacoApi(); }
   setInterval(tick, 1000);
   tick();
 })();
