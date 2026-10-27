@@ -151,10 +151,34 @@ function readOneMessage(stream) {
   });
 }
 
+// Long-lived mode: the extension keeps this connection open while Firefox
+// runs, and the bridge passes on each game that gameguard.js closes so the
+// extension can open today's task in the right window.
+function watchGames(send, intervalMs = 2000) {
+  const { EVENTS_PATH } = require(path.join(__dirname, "gameguard.js"));
+  const read = () => { try { return JSON.parse(fs.readFileSync(EVENTS_PATH, "utf8")); } catch { return null; } };
+  let last = (read() || {}).at || 0;
+  return setInterval(() => {
+    const e = read();
+    if (e && e.at > last) {
+      last = e.at;
+      send({ type: "gameClosed", label: String(e.label || ""), at: e.at });
+    }
+  }, intervalMs);
+}
+
 async function main() {
   let reply;
   try {
     const msg = await readOneMessage(process.stdin);
+    if (msg.type === "watch") {
+      writeMessage({ ok: true, watching: true });
+      watchGames(writeMessage);
+      // Firefox closes stdin when the extension disconnects.
+      process.stdin.on("end", () => process.exit(0));
+      process.stdin.resume();
+      return;
+    }
     reply = { ok: true, ...(await handle(msg)) };
   } catch (e) {
     reply = { ok: false, error: e.message || String(e) };
@@ -164,4 +188,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { buildArgs, childEnv, parseResult, handle, GUARD_TASK };
+module.exports = { buildArgs, childEnv, parseResult, handle, watchGames, GUARD_TASK };
