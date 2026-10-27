@@ -87,15 +87,19 @@ function reportGames(msg) {
   };
   fs.mkdirSync(path.dirname(guard.STATE_PATH), { recursive: true });
   fs.writeFileSync(guard.STATE_PATH, JSON.stringify(state, null, 2));
-  if (guard.otherGuardRunning()) return { guard: "running" };
+  // The last game the guard closed, so the extension can show today's task.
+  let lastClosed = null;
+  try { lastClosed = JSON.parse(fs.readFileSync(guard.EVENTS_PATH, "utf8")); } catch { /* none yet */ }
+  const reply = (r) => ({ ...r, lastClosed });
+  if (guard.otherGuardRunning()) return reply({ guard: "running" });
   // On Windows, Firefox closes everything the bridge starts when the bridge
   // exits, so ask Task Scheduler (set up by install.js) to start it instead.
   if (process.platform === "win32" && spawnSync("schtasks", ["/run", "/tn", GUARD_TASK], { windowsHide: true, stdio: "ignore" }).status === 0) {
-    return { guard: "started" };
+    return reply({ guard: "started" });
   }
   const child = spawn(process.execPath, [path.join(__dirname, "gameguard.js")], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
-  return { guard: "started" };
+  return reply({ guard: "started" });
 }
 
 async function handle(msg, config = loadConfig()) {
@@ -151,34 +155,10 @@ function readOneMessage(stream) {
   });
 }
 
-// Long-lived mode: the extension keeps this connection open while Firefox
-// runs, and the bridge passes on each game that gameguard.js closes so the
-// extension can open today's task in the right window.
-function watchGames(send, intervalMs = 2000) {
-  const { EVENTS_PATH } = require(path.join(__dirname, "gameguard.js"));
-  const read = () => { try { return JSON.parse(fs.readFileSync(EVENTS_PATH, "utf8")); } catch { return null; } };
-  let last = (read() || {}).at || 0;
-  return setInterval(() => {
-    const e = read();
-    if (e && e.at > last) {
-      last = e.at;
-      send({ type: "gameClosed", label: String(e.label || ""), at: e.at });
-    }
-  }, intervalMs);
-}
-
 async function main() {
   let reply;
   try {
     const msg = await readOneMessage(process.stdin);
-    if (msg.type === "watch") {
-      writeMessage({ ok: true, watching: true });
-      watchGames(writeMessage);
-      // Firefox closes stdin when the extension disconnects.
-      process.stdin.on("end", () => process.exit(0));
-      process.stdin.resume();
-      return;
-    }
     reply = { ok: true, ...(await handle(msg)) };
   } catch (e) {
     reply = { ok: false, error: e.message || String(e) };
@@ -188,4 +168,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { buildArgs, childEnv, parseResult, handle, watchGames, GUARD_TASK };
+module.exports = { buildArgs, childEnv, parseResult, handle, GUARD_TASK };

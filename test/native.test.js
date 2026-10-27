@@ -231,14 +231,18 @@ test("bridge saves the game report and starts the blocker", { skip: process.plat
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-home-"));
   const run = (msg) => unframe(spawnSync(process.execPath, [path.join(dir, "host.js")], { input: frame(msg), env: { ...process.env, HOME: home } }).stdout);
   const out = run({ type: "games", date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"] });
-  assert.deepStrictEqual(out, { ok: true, guard: "started" });
+  assert.deepStrictEqual(out, { ok: true, guard: "started", lastClosed: null });
   const state = readJson(path.join(home, ".leetcode-daily-lock", "games.json"));
   assert.deepStrictEqual({ ...state, updatedAt: 0 }, { date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"], updatedAt: 0 });
   const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
   try {
     assert.ok(hb && alive(hb.pid));
     // A second report finds it running instead of starting another.
-    assert.deepStrictEqual(run({ type: "games", date: "2026-10-27", done: true, enabled: true }), { ok: true, guard: "running" });
+    // The last game the blocker closed comes back for the extension.
+    guard.showTask([{ name: "LeagueClientUx.exe" }], Date.now(), path.join(home, ".leetcode-daily-lock", "gameguard-event.json"));
+    const again = run({ type: "games", date: "2026-10-27", done: true, enabled: true });
+    assert.strictEqual(again.guard, "running", "a second report finds it running instead of starting another");
+    assert.strictEqual(again.lastClosed.label, "League of Legends");
     assert.deepStrictEqual(readJson(path.join(home, ".leetcode-daily-lock", "games.json")).processes, guard.DEFAULT_GAMES);
   } finally {
     if (hb) try { process.kill(hb.pid); } catch { /* gone */ }
@@ -263,41 +267,4 @@ test("the task page names the game that was closed", () => {
   assert.strictEqual(guard.gameLabel([{ name: "steamwebhelper.exe" }, { name: "steam.exe" }]), "Steam");
   assert.strictEqual(guard.gameLabel([{ name: "LeagueClientUx.exe" }]), "League of Legends");
   assert.strictEqual(guard.gameLabel([{ name: "Hades.exe" }]), "Hades");
-});
-
-test("the bridge passes closed games to the extension over a kept-open connection", { skip: process.platform === "win32" }, async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-host-"));
-  for (const f of [HOST_JS, GUARD_JS]) fs.copyFileSync(f, path.join(dir, path.basename(f)));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-home-"));
-  const events = path.join(home, ".leetcode-daily-lock", "gameguard-event.json");
-  fs.mkdirSync(path.dirname(events), { recursive: true });
-  fs.writeFileSync(events, JSON.stringify({ at: 1, label: "old" })); // from before: not replayed
-  const child = require("node:child_process").spawn(process.execPath, [path.join(dir, "host.js")], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "inherit"] });
-  let buf = Buffer.alloc(0);
-  const msgs = [];
-  child.stdout.on("data", (d) => {
-    buf = Buffer.concat([buf, d]);
-    while (buf.length >= 4 && buf.length >= 4 + buf.readUInt32LE(0)) {
-      const len = buf.readUInt32LE(0);
-      msgs.push(JSON.parse(buf.slice(4, 4 + len).toString()));
-      buf = buf.slice(4 + len);
-    }
-  });
-  const until = async (fn, ms = 6000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); } return false; };
-  const exited = new Promise((r) => child.on("exit", r));
-  try {
-    child.stdin.write(frame({ type: "watch" }));
-    assert.ok(await until(() => msgs.length >= 1));
-    assert.deepStrictEqual(msgs[0], { ok: true, watching: true });
-    // The blocker closes a game: it writes the event the bridge watches.
-    const now = Date.now();
-    guard.showTask([{ name: "steam.exe" }], now, events);
-    assert.ok(await until(() => msgs.length >= 2), "game event forwarded");
-    assert.deepStrictEqual(msgs.slice(1), [{ type: "gameClosed", label: "Steam", at: now }]);
-    // Firefox disconnecting closes stdin; the bridge exits.
-    child.stdin.end();
-    await exited;
-  } finally {
-    child.kill();
-  }
 });

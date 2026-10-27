@@ -463,30 +463,21 @@ test("missing bridge is reported on the settings page, not thrown", async () => 
   assert.match(st.gameGuard.error, /bridge isn't installed/);
 });
 
-test("a game closed by the blocker opens today's task in this Firefox", async () => {
-  const env = makeEnv({ native: () => ({ ok: true, guard: "running" }) });
-  const ports = [];
-  env.ctx.browser.runtime.connectNative = (host) => {
-    const l = { msg: [], dis: [] };
-    const port = { host, sent: [], l,
-      onMessage: { addListener: (fn) => l.msg.push(fn) },
-      onDisconnect: { addListener: (fn) => l.dis.push(fn) },
-      postMessage: (m) => port.sent.push(m) };
-    ports.push(port);
-    return port;
-  };
-  await env.msg({ type: "refresh" });
-  await env.msg({ type: "refresh" });
-  assert.strictEqual(ports.length, 1, "one connection, kept open");
-  assert.strictEqual(ports[0].host, "leetcode_daily_lock_claude");
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(ports[0].sent)), [{ type: "watch" }]);
+test("a game closed by the blocker opens today's task once, within a minute", async () => {
+  let lastClosed = null;
+  const env = makeEnv({ native: () => ({ ok: true, guard: "running", lastClosed }) });
+  const page = "moz-extension://test/pages/blocked.html?g=League%20of%20Legends";
+  const opened = () => env.createdTabs.filter((u) => u === page).length;
 
-  ports[0].l.msg[0]({ type: "gameClosed", label: "League of Legends", at: 1 });
-  await tick();
-  assert.ok(env.createdTabs.includes("moz-extension://test/pages/blocked.html?g=League%20of%20Legends"));
+  // An old close (from before an update) doesn't open anything.
+  lastClosed = { at: Date.now() - 60 * 60 * 1000, label: "League of Legends" };
+  await env.listeners.alarm({ name: "games" });
+  assert.strictEqual(opened(), 0);
 
-  // Dropped connections come back on the next sync.
-  ports[0].l.dis[0]();
+  lastClosed = { at: Date.now(), label: "League of Legends" };
+  await env.listeners.alarm({ name: "games" });
+  assert.strictEqual(opened(), 1);
+  await env.listeners.alarm({ name: "games" });
   await env.msg({ type: "refresh" });
-  assert.strictEqual(ports.length, 2);
+  assert.strictEqual(opened(), 1, "each close opens the page only once");
 });

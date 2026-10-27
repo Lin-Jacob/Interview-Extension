@@ -189,8 +189,8 @@ function gameLabel(hits) {
 
 // Asks Firefox to show today's task after closing a game, at most once a
 // minute so a launcher that keeps retrying doesn't flood it with tabs. The
-// bridge (host.js) watches this file over the extension's open connection,
-// so the tab opens in the Firefox window and profile the extension runs in.
+// extension asks the bridge (host.js) for this every minute and opens the tab
+// itself, so it lands in the Firefox window and profile the extension runs in.
 let lastShown = 0;
 function showTask(hits, now = Date.now(), eventsPath = EVENTS_PATH) {
   if (now - lastShown < 60 * 1000) return;

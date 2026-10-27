@@ -3,6 +3,7 @@
 // daily goal is met, picks problems from weak topics, and talks to Claude.
 
 const SYNC_ALARM = "sync";
+const GAMES_ALARM = "games";
 const STORAGE_DEFAULTS = {
   settings: Core.DEFAULT_SETTINGS,
   acList: [],
@@ -296,26 +297,10 @@ async function afterStateChange() {
   await reportGames(s.settings, p, s.gameGuard);
 }
 
-// A long-lived bridge connection that reports each game the blocker closes, so
-// today's task opens right here (outside programs can't open extension pages,
-// and Windows may open links in another Firefox profile). Reconnected on
-// every sync if it drops.
-let gamePort = null;
-function watchGameEvents() {
-  if (gamePort || !browser.runtime.connectNative) return;
-  try {
-    gamePort = browser.runtime.connectNative(NATIVE_HOST);
-  } catch {
-    gamePort = null;
-    return;
-  }
-  gamePort.onMessage.addListener((m) => {
-    if (m && m.type === "gameClosed") showGameClosed(m.label).catch(() => {});
-  });
-  gamePort.onDisconnect.addListener(() => { gamePort = null; });
-  gamePort.postMessage({ type: "watch" });
-}
-
+// Opens today's task after the bridge reports a game the blocker closed.
+// Outside programs can't open extension pages, and Windows may open links in
+// another Firefox profile, so the extension asks the bridge every minute
+// (GAMES_ALARM) instead.
 async function showGameClosed(label) {
   const tab = await browser.tabs.create({ url: browser.runtime.getURL(`pages/blocked.html?g=${encodeURIComponent(label || "Games")}`), active: true });
   if (tab && tab.windowId !== undefined) await browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
@@ -326,16 +311,27 @@ async function showGameClosed(label) {
 // blocking is off, one last report tells the blocker to stand down.
 async function reportGames(settings, p, last) {
   const enabled = !!settings.blockGames;
-  if (enabled) watchGameEvents();
   if (!enabled && !(last && last.enabled)) return;
-  const report = { at: Date.now(), enabled, done: p.done };
+  const report = { at: Date.now(), enabled, done: p.done, seenClosedAt: (last && last.seenClosedAt) || 0 };
   try {
     const r = await nativeCall({ type: "games", date: Core.dateKey(), done: p.done, enabled, processes: Core.parseGameList(settings.blockedGames) });
     report.guard = r.guard || "";
+    // Only games closed since the last check, and never one from long ago
+    // (the first check after installing or updating).
+    const closed = r.lastClosed;
+    if (enabled && closed && closed.at > report.seenClosedAt && Date.now() - closed.at < 10 * 60 * 1000) {
+      try { await showGameClosed(closed.label); } catch (e) { report.tabError = e.message; }
+    }
+    if (closed && closed.at > report.seenClosedAt) report.seenClosedAt = closed.at;
   } catch (e) {
     report.error = e.message;
   }
   await save({ gameGuard: report });
+}
+
+async function checkGames() {
+  const s = await load(["settings", "gameGuard", ...PROGRESS_KEYS]);
+  await reportGames(s.settings, progressFrom(s), s.gameGuard);
 }
 
 // ---------- help (Claude) ----------
@@ -845,7 +841,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 });
 
 browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === SYNC_ALARM) sync();
+  if (alarm.name === SYNC_ALARM) return sync();
+  if (alarm.name === GAMES_ALARM) return checkGames();
 });
 
 browser.runtime.onInstalled.addListener(async ({ reason }) => {
@@ -877,4 +874,5 @@ browser.runtime.onInstalled.addListener(async ({ reason }) => {
 });
 
 browser.alarms.create(SYNC_ALARM, { periodInMinutes: 5 });
+browser.alarms.create(GAMES_ALARM, { periodInMinutes: 1 });
 sync();
