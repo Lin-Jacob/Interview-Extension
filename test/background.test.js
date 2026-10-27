@@ -428,3 +428,37 @@ test("update to 1.5 turns Friday into SQL only for the old default schedule", as
   await env.listeners.installed({ reason: "update" });
   assert.deepStrictEqual(env.store.settings.schedule, custom);
 });
+
+test("game blocker hears whether today's task is done, and once more when turned off", async () => {
+  const env = makeEnv({ native: (m) => (m.type === "games" ? { ok: true, guard: "running" } : { ok: true, text: "" }) });
+  await env.msg({ type: "refresh" });
+  let games = env.nativeCalls.filter((c) => c.type === "games");
+  assert.ok(games.length >= 1);
+  const last = games[games.length - 1];
+  assert.strictEqual(last.done, false);
+  assert.strictEqual(last.enabled, true);
+  assert.ok(last.processes.includes("steam.exe"));
+  let st = await env.msg({ type: "getState" });
+  assert.strictEqual(st.gameGuard.guard, "running");
+
+  await env.msg({ type: "accepted", slug: "two-sum", title: "Two Sum" });
+  await env.msg({ type: "accepted", slug: "add-two-numbers", title: "Add Two Numbers" });
+  games = env.nativeCalls.filter((c) => c.type === "games");
+  assert.strictEqual(games[games.length - 1].done, true);
+
+  await env.msg({ type: "saveSettings", settings: { blockGames: false, blockedGames: "steam.exe\n\nsteam.exe\nminecraft.exe" } });
+  st = await env.msg({ type: "getState" });
+  assert.deepStrictEqual(st.settings.blockedGames, ["steam.exe", "minecraft.exe"]);
+  games = env.nativeCalls.filter((c) => c.type === "games");
+  assert.strictEqual(games[games.length - 1].enabled, false);
+  const n = games.length;
+  await env.msg({ type: "refresh" });
+  assert.strictEqual(env.nativeCalls.filter((c) => c.type === "games").length, n, "no reports while blocking is off");
+});
+
+test("missing bridge is reported on the settings page, not thrown", async () => {
+  const env = makeEnv();
+  await env.msg({ type: "refresh" });
+  const st = await env.msg({ type: "getState" });
+  assert.match(st.gameGuard.error, /bridge isn't installed/);
+});

@@ -69,6 +69,6 @@ jobs:
           xpi="interview-extension-$version.xpi"
           mv web-ext-artifacts/*.xpi "$xpi"
           node scripts/updates-json.js "$xpi" > updates.json
-          (cd native && zip -q ../leetcode-daily-lock-bridge.zip host.js install.js README.txt)
+          (cd native && zip -q ../leetcode-daily-lock-bridge.zip host.js gameguard.js install.js README.txt)
           gh release create "v$version" "$xpi" updates.json leetcode-daily-lock-bridge.zip \
             --title "v$version" --notes "Signed build $version. Firefox installs it automatically; to install by hand, open $xpi in Firefox."
