@@ -150,26 +150,77 @@ test("game rules match program names and install folders", () => {
   assert.ok(!m("Code.exe", "C:\\Users\\j\\steamapps-notes\\Code.exe"));
 });
 
-test("game blocker closes a running game until the task is done", { skip: process.platform === "win32" }, async () => {
+test("game blocker leaves games that were already open, and closes new launches", { skip: process.platform === "win32" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-game-"));
   const exe = path.join(dir, "fakegame-lcdl");
   fs.copyFileSync(fs.realpathSync("/bin/sleep"), exe);
   fs.chmodSync(exe, 0o755);
-  const game = require("node:child_process").spawn(exe, ["60"], { stdio: "ignore" });
-  const exited = new Promise((r) => game.on("exit", r));
+  // A "client" that later starts a game from its own folder, like a League match.
+  const client = path.join(dir, "fakeclient-lcdl");
+  fs.copyFileSync(fs.realpathSync("/bin/sh"), client);
+  fs.chmodSync(client, 0o755);
+  const sessionPath = path.join(dir, "session.json");
+  const { spawn } = require("node:child_process");
+  const started = [];
+  const launch = (file) => { const c = spawn(file, ["60"], { stdio: "ignore" }); started.push(c); return c; };
+  const today = guard.dateKey();
+  const blocked = { date: today, done: false, processes: ["fakegame-lcdl", "fakeclient-lcdl"] };
+  const check = (state) => guard.checkOnce({ state, sessionPath });
   try {
+    const open = launch(exe);
     await new Promise((r) => setTimeout(r, 100));
-    const today = guard.dateKey();
-    let hits = await guard.checkOnce({ state: { date: today, done: true, processes: ["fakegame-lcdl"] } });
-    assert.deepStrictEqual(hits, []);
-    hits = await guard.checkOnce({ state: { date: today, done: false, processes: ["notthis.exe"] } });
-    assert.deepStrictEqual(hits, []);
-    hits = await guard.checkOnce({ state: { date: today, done: false, processes: [dir + "/"] } });
-    assert.deepStrictEqual(hits.map((h) => h.pid), [game.pid]);
-    await exited;
+    assert.deepStrictEqual(await check({ ...blocked, done: true }), [], "allowed once the task is done");
+    assert.deepStrictEqual(await check(blocked), [], "a game already open when blocking starts keeps running");
+    assert.ok(alive(open.pid));
+
+    const fresh = launch(exe);
+    await new Promise((r) => setTimeout(r, 100));
+    let hits = await check(blocked);
+    assert.deepStrictEqual(hits.map((h) => h.pid), [fresh.pid], "a new launch is closed");
+    assert.ok(alive(open.pid));
+
+    // A kept client starting a game from its own folder is part of that session.
+    const c = spawn(client, ["-c", `sleep 0.4; "${exe}" 60 & wait`], { stdio: "ignore" });
+    started.push(c);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepStrictEqual(await check({ ...blocked, done: true }), []);
+    assert.deepStrictEqual(await check(blocked), [], "client open when blocking starts is kept");
+    await new Promise((r) => setTimeout(r, 600));
+    assert.deepStrictEqual(await check(blocked), [], "the game it starts is kept too");
+    assert.ok(alive(c.pid));
+
+    // Closing the open game and starting it again counts as a new launch.
+    open.kill("SIGKILL");
+    await new Promise((r) => setTimeout(r, 100));
+    const again = launch(exe);
+    await new Promise((r) => setTimeout(r, 100));
+    hits = await check(blocked);
+    assert.deepStrictEqual(hits.map((h) => h.pid), [again.pid]);
+
+    // After a done day, blocking starts over: what's open then is kept, folders match too.
+    assert.deepStrictEqual(await check({ ...blocked, done: true }), []);
+    const keep = launch(exe);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepStrictEqual(await check({ ...blocked, processes: [dir + "/"] }), []);
+    assert.ok(alive(keep.pid));
+    const late = launch(exe);
+    await new Promise((r) => setTimeout(r, 100));
+    hits = await check({ ...blocked, processes: [dir + "/"] });
+    assert.deepStrictEqual(hits.map((h) => h.pid), [late.pid]);
   } finally {
-    try { game.kill("SIGKILL"); } catch { /* gone */ }
+    for (const c of started) try { c.kill("SIGKILL"); } catch { /* gone */ }
+    spawnSync("pkill", ["-9", "-f", dir]);
   }
+});
+
+test("programs a kept game starts from its own folder are part of it; Steam library games are not", () => {
+  const P = (p) => ({ name: p.split("\\").pop(), path: p });
+  assert.ok(guard.partOfGame(P("C:\\Riot Games\\League of Legends\\Game\\League of Legends.exe"), P("C:\\Riot Games\\League of Legends\\LeagueClient.exe")));
+  assert.ok(guard.partOfGame(P("C:\\Riot Games\\VALORANT\\live\\ShooterGame\\Binaries\\Win64\\VALORANT-Win64-Shipping.exe"), P("C:\\Riot Games\\VALORANT\\live\\VALORANT.exe")));
+  assert.ok(!guard.partOfGame(P("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades\\Hades.exe"), P("C:\\Program Files (x86)\\Steam\\steam.exe")));
+  assert.ok(!guard.partOfGame(P("D:\\SteamLibrary\\steamapps\\common\\Hades\\Hades.exe"), P("C:\\Program Files (x86)\\Steam\\steam.exe")));
+  assert.ok(!guard.partOfGame(P("C:\\Riot Games\\League of Legends\\LeagueClient.exe"), P("C:\\Riot Games\\Riot Client\\RiotClientServices.exe")));
+  assert.ok(!guard.partOfGame(P("C:\\Program Files\\Epic Games\\Fortnite\\Fortnite.exe"), P("C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe")));
 });
 
 test("bridge saves the game report and starts the blocker", { skip: process.platform === "win32" }, () => {

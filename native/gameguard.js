@@ -14,6 +14,9 @@ const DATA_DIR = path.join(os.homedir(), ".leetcode-daily-lock");
 const STATE_PATH = path.join(DATA_DIR, "games.json");
 const HEARTBEAT_PATH = path.join(DATA_DIR, "gameguard.json");
 const LOG_PATH = path.join(DATA_DIR, "gameguard.log");
+// Games that were already open when blocking started, which keep running
+// until they're closed: { blocking, procs: [{ pid, name, path }] }.
+const SESSION_PATH = path.join(DATA_DIR, "gameguard-session.json");
 const INTERVAL_MS = 10 * 1000;
 const STALE_MS = 60 * 1000;
 const WIN = process.platform === "win32";
@@ -72,28 +75,28 @@ function exec(cmd, args, timeout = 20000) {
   });
 }
 
-// [{ pid, name, path }] for every running process we can see.
+// [{ pid, ppid, name, path }] for every running process we can see.
 async function listProcesses() {
   if (WIN) {
     try {
       const out = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-        "Get-Process | ForEach-Object { '{0}|{1}|{2}' -f $_.Id, $_.ProcessName, $_.Path }"]);
+        "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.ExecutablePath }"]);
       return out.split(/\r?\n/).filter(Boolean).map((line) => {
-        const [pid, name, ...rest] = line.split("|");
-        return { pid: Number(pid), name: `${name}.exe`, path: rest.join("|").trim() };
+        const [pid, ppid, name, ...rest] = line.split("|");
+        return { pid: Number(pid), ppid: Number(ppid), name, path: rest.join("|").trim() };
       }).filter((p) => p.pid > 0);
     } catch {
       // No PowerShell: names only.
       const out = await exec("tasklist", ["/fo", "csv", "/nh"]);
       return out.split(/\r?\n/).filter(Boolean).map((line) => {
         const cols = line.match(/"([^"]*)"/g) || [];
-        return { pid: Number((cols[1] || "").replace(/"/g, "")), name: (cols[0] || "").replace(/"/g, ""), path: "" };
+        return { pid: Number((cols[1] || "").replace(/"/g, "")), ppid: 0, name: (cols[0] || "").replace(/"/g, ""), path: "" };
       }).filter((p) => p.pid > 0);
     }
   }
-  const out = await exec("ps", ["-Ao", "pid=,args="]);
-  return out.split("\n").map((line) => line.trim().match(/^(\d+)\s+(\S+)/)).filter(Boolean)
-    .map(([, pid, cmd]) => ({ pid: Number(pid), name: path.basename(cmd), path: cmd }));
+  const out = await exec("ps", ["-Ao", "pid=,ppid=,args="]);
+  return out.split("\n").map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)/)).filter(Boolean)
+    .map(([, pid, ppid, cmd]) => ({ pid: Number(pid), ppid: Number(ppid), name: path.basename(cmd), path: cmd }));
 }
 
 async function kill(pids) {
@@ -115,16 +118,63 @@ function log(line) {
   } catch { /* logging is best effort */ }
 }
 
+// A program started by a game that was already open counts as part of that
+// game (a match starting from the League client, a game's own helpers) when it
+// lives in the same install folder. Games launched from Steam's library aren't
+// part of Steam, so a launcher that stays open can't start anything new.
+function partOfGame(child, parent) {
+  if (!child.path || !parent.path) return stripExe(child.name || "") === stripExe(parent.name || "");
+  const pp = slashes(parent.path);
+  const dir = pp.slice(0, pp.lastIndexOf("\\") + 1);
+  const p = slashes(child.path);
+  return p.startsWith(dir) && !p.slice(dir.length).includes("steamapps\\");
+}
+
 // One pass: closes matching programs unless games are allowed right now.
-// Returns the processes it closed.
-async function checkOnce({ state = readJson(STATE_PATH, null), now = Date.now() } = {}) {
-  if (gamesAllowed(state, now)) return [];
+// Games already open when blocking starts (at midnight, when it's turned on,
+// or when the blocker is installed) keep running until closed; anything
+// opened after that is closed. Returns the processes it closed.
+async function checkOnce({ state = readJson(STATE_PATH, null), now = Date.now(), sessionPath = SESSION_PATH } = {}) {
+  const session = readJson(sessionPath, null);
+  if (gamesAllowed(state, now)) {
+    if (!session || session.blocking) writeJson(sessionPath, { blocking: false, procs: [] });
+    return [];
+  }
   const rules = compileRules(state && Array.isArray(state.processes) ? state.processes : DEFAULT_GAMES);
+  const procs = await listProcesses();
   const safe = new Set([process.pid, process.ppid]);
-  const hits = (await listProcesses()).filter((p) => !safe.has(p.pid) && matches(p, rules));
+  const games = procs.filter((p) => !safe.has(p.pid) && matches(p, rules));
+  const key = (p) => `${p.pid}|${stripExe(p.name || "")}`;
+  let kept;
+  if (!session || !session.blocking) {
+    // Blocking just started: whatever is open now may keep running.
+    kept = new Map(games.map((p) => [key(p), p]));
+    if (kept.size) log(`left open until closed: ${games.map((p) => `${p.name} (${p.pid})`).join(", ")}`);
+  } else {
+    // Still-running games from before, plus anything they started themselves.
+    const running = new Set(procs.map(key));
+    kept = new Map(session.procs.filter((p) => running.has(key(p))).map((p) => [key(p), p]));
+    const byPid = new Map(procs.map((p) => [p.pid, p]));
+    for (const g of games) {
+      if (kept.has(key(g))) continue;
+      for (let parent = byPid.get(g.ppid), hops = 0; parent && hops < 10; parent = byPid.get(parent.ppid), hops++) {
+        const k = kept.get(key(parent));
+        if (k && partOfGame(g, k)) { kept.set(key(g), g); break; }
+      }
+    }
+  }
+  writeJson(sessionPath, { blocking: true, procs: [...kept.values()].map(({ pid, name, path: p }) => ({ pid, name, path: p })) });
+  const hits = games.filter((p) => !kept.has(key(p)));
   await kill(hits.map((p) => p.pid));
   if (hits.length) log(`closed ${hits.map((p) => `${p.name} (${p.pid})`).join(", ")}: today's task isn't done yet`);
   return hits;
+}
+
+function writeJson(p, data) {
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(data));
+  } catch { /* try again next tick */ }
 }
 
 function isAlive(pid) {
@@ -157,6 +207,6 @@ async function main() {
 
 if (require.main === module) main();
 module.exports = {
-  DEFAULT_GAMES, STATE_PATH, HEARTBEAT_PATH, dateKey, gamesAllowed, compileRules, matches,
+  DEFAULT_GAMES, STATE_PATH, HEARTBEAT_PATH, SESSION_PATH, dateKey, partOfGame, gamesAllowed, compileRules, matches,
   listProcesses, checkOnce, otherGuardRunning
 };

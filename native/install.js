@@ -60,6 +60,8 @@ function stopGuard() {
     if (pid) process.kill(pid);
   } catch { /* not running */ }
   fs.rmSync(hbPath, { force: true });
+  // Games open right now count as already running and stay open until closed.
+  fs.rmSync(path.join(HOME, ".leetcode-daily-lock", "gameguard-session.json"), { force: true });
 }
 
 // Windows: a hidden launcher, run at sign-in (Startup folder) and every 5
