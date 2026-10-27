@@ -104,7 +104,9 @@ async function kill(pids) {
   if (WIN) {
     const args = ["/F", "/T"];
     for (const pid of pids) args.push("/PID", String(pid));
-    await exec("taskkill", args).catch(() => {});
+    // Programs running as administrator can't be closed unless the blocker is
+    // too (install from an administrator terminal); say so in the log.
+    await exec("taskkill", args).catch((e) => log(`couldn't close some programs: ${String(e.message).trim().slice(0, 300)}`));
     return;
   }
   for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
