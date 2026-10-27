@@ -271,24 +271,8 @@ function blockedPageUrl(target) {
   return browser.runtime.getURL(`pages/blocked.html?u=${encodeURIComponent(target)}`);
 }
 
-// The bridge's game blocker opens this leetcode.com address after closing a
-// game (native/gameguard.js taskPageUrl); show today's task instead.
-const TASK_PAGE_MARKER = "lcdl-game";
-
-function gamePageFor(url) {
-  let u;
-  try { u = new URL(url); } catch { return null; }
-  if (u.hostname !== "leetcode.com" || !u.searchParams.has(TASK_PAGE_MARKER)) return null;
-  return browser.runtime.getURL(`pages/blocked.html?g=${encodeURIComponent(u.searchParams.get(TASK_PAGE_MARKER) || "Games")}`);
-}
-
 browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return;
-  const gamePage = gamePageFor(details.url);
-  if (gamePage) {
-    browser.tabs.update(details.tabId, { url: gamePage });
-    return;
-  }
   if (await shouldBlock(details.url)) {
     browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url) });
   }
@@ -312,11 +296,37 @@ async function afterStateChange() {
   await reportGames(s.settings, p, s.gameGuard);
 }
 
+// A long-lived bridge connection that reports each game the blocker closes, so
+// today's task opens right here (outside programs can't open extension pages,
+// and Windows may open links in another Firefox profile). Reconnected on
+// every sync if it drops.
+let gamePort = null;
+function watchGameEvents() {
+  if (gamePort || !browser.runtime.connectNative) return;
+  try {
+    gamePort = browser.runtime.connectNative(NATIVE_HOST);
+  } catch {
+    gamePort = null;
+    return;
+  }
+  gamePort.onMessage.addListener((m) => {
+    if (m && m.type === "gameClosed") showGameClosed(m.label).catch(() => {});
+  });
+  gamePort.onDisconnect.addListener(() => { gamePort = null; });
+  gamePort.postMessage({ type: "watch" });
+}
+
+async function showGameClosed(label) {
+  const tab = await browser.tabs.create({ url: browser.runtime.getURL(`pages/blocked.html?g=${encodeURIComponent(label || "Games")}`), active: true });
+  if (tab && tab.windowId !== undefined) await browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
+}
+
 // Tells the bridge's game blocker whether games are allowed today. Sent on
 // every sync too, which also restarts the blocker if it was closed. Once
 // blocking is off, one last report tells the blocker to stand down.
 async function reportGames(settings, p, last) {
   const enabled = !!settings.blockGames;
+  if (enabled) watchGameEvents();
   if (!enabled && !(last && last.enabled)) return;
   const report = { at: Date.now(), enabled, done: p.done };
   try {

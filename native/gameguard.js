@@ -17,6 +17,8 @@ const LOG_PATH = path.join(DATA_DIR, "gameguard.log");
 // Games that were already open when blocking started, which keep running
 // until they're closed: { blocking, procs: [{ pid, name, path }] }.
 const SESSION_PATH = path.join(DATA_DIR, "gameguard-session.json");
+// The last game closed, for the bridge to tell the extension: { at, label }.
+const EVENTS_PATH = path.join(DATA_DIR, "gameguard-event.json");
 const INTERVAL_MS = 10 * 1000;
 const STALE_MS = 60 * 1000;
 const WIN = process.platform === "win32";
@@ -185,23 +187,15 @@ function gameLabel(hits) {
   return known ? FRIENDLY[known] : (hits[0].name || "Game").replace(/\.exe$/i, "");
 }
 
-// The extension turns this leetcode.com address into its "finish today's task
-// first" page, which lists today's task (background.js, TASK_PAGE_MARKER).
-function taskPageUrl(label) {
-  return `https://leetcode.com/?lcdl-game=${encodeURIComponent(label)}`;
-}
-
-// Opens today's task in the browser after closing a game, at most once a
-// minute so a launcher that keeps retrying doesn't flood it with tabs.
+// Asks Firefox to show today's task after closing a game, at most once a
+// minute so a launcher that keeps retrying doesn't flood it with tabs. The
+// bridge (host.js) watches this file over the extension's open connection,
+// so the tab opens in the Firefox window and profile the extension runs in.
 let lastShown = 0;
-function showTask(hits, now = Date.now()) {
+function showTask(hits, now = Date.now(), eventsPath = EVENTS_PATH) {
   if (now - lastShown < 60 * 1000) return;
   lastShown = now;
-  const url = taskPageUrl(gameLabel(hits));
-  // explorer.exe opens it in the default browser as the signed-in user, even
-  // when the blocker itself runs as administrator.
-  const [cmd, args] = WIN ? ["explorer.exe", [url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
-  execFile(cmd, args, { windowsHide: true }, () => {});
+  writeJson(eventsPath, { at: now, label: gameLabel(hits) });
 }
 
 function writeJson(p, data) {
@@ -242,5 +236,5 @@ async function main() {
 if (require.main === module) main();
 module.exports = {
   DEFAULT_GAMES, STATE_PATH, HEARTBEAT_PATH, SESSION_PATH, dateKey, partOfGame, gamesAllowed, compileRules, matches,
-  listProcesses, checkOnce, otherGuardRunning, gameLabel, taskPageUrl
+  listProcesses, checkOnce, otherGuardRunning, gameLabel, showTask, EVENTS_PATH
 };

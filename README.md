@@ -48,7 +48,8 @@ client. Opening anything new gets it closed, and that includes a game started fr
 already open. It checks every 10 seconds, starts when you sign in to Windows, and Task
 Scheduler restarts it every 5 minutes if it's closed. Firefox tells it about your progress through the
 bridge, so on a day Firefox hasn't reported the task as done, games stay closed. At midnight a new day
-starts and games close again until that day's task is done. A log of what it closed is in
+starts and games close again until that day's task is done. Each time it closes a game, Firefox opens a page that names the game and lists today's task (at most once a
+minute). The extension opens that tab itself through the bridge, so it lands in the Firefox profile you use. A log of what it closed is in
 `~/.leetcode-daily-lock/gameguard.log`. It isn't tamper-proof: deleting the scheduled task or
 uninstalling the bridge turns it off.
 
