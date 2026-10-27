@@ -242,3 +242,17 @@ test("bridge saves the game report and starts the blocker", { skip: process.plat
     if (hb) try { process.kill(hb.pid); } catch { /* gone */ }
   }
 });
+
+test("installer sets up the game blocker even without Claude Code", { skip: process.platform === "win32" }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-inst-"));
+  const env = { ...process.env, HOME: home, PATH: "/usr/bin:/bin" };
+  const r = spawnSync(process.execPath, [path.join(__dirname, "..", "native", "install.js")], { env, encoding: "utf8" });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /Couldn't find Claude Code.*Installing the game blocker anyway/);
+  assert.match(r.stdout, /Game blocker is running/);
+  const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
+  assert.ok(hb && alive(hb.pid));
+  const u = spawnSync(process.execPath, [path.join(__dirname, "..", "native", "install.js"), "--uninstall"], { env, encoding: "utf8" });
+  assert.strictEqual(u.status, 0);
+  assert.ok(waitFor(() => !alive(hb.pid)));
+});

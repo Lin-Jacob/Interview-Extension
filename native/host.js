@@ -100,6 +100,7 @@ function reportGames(msg) {
 
 async function handle(msg, config = loadConfig()) {
   if (msg.type === "games") return reportGames(msg);
+  if (!config.claude) throw new Error("The bridge couldn't find Claude Code when it was installed. Install Claude Code, then run `node install.js` again.");
   const { command, args: baseArgs = [] } = config.claude;
   const env = childEnv(process.env, config);
   fs.mkdirSync(WORK_DIR, { recursive: true });

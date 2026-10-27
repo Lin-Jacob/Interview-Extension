@@ -35,20 +35,32 @@ function findClaude() {
     found = execFileSync(WIN ? "where" : "which", WIN ? ["claude"] : ["-a", "claude"], { encoding: "utf8" })
       .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   } catch { /* not on PATH */ }
+  const localAppData = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
   const extra = WIN
-    ? [path.join(HOME, ".local", "bin", "claude.exe")]
+    ? [path.join(HOME, ".local", "bin", "claude.exe"), path.join(localAppData, "Microsoft", "WinGet", "Links", "claude.exe"),
+        path.join(process.env.APPDATA || path.join(HOME, "AppData", "Roaming"), "npm", "claude.cmd")]
     : [path.join(HOME, ".local", "bin", "claude"), path.join(HOME, ".claude", "local", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
   for (const p of found.concat(extra)) {
     if (!fs.existsSync(p)) continue;
     if (WIN && /\.(cmd|bat|ps1)$/i.test(p)) {
       // npm shim: run its JavaScript entry point with node directly, which avoids cmd.exe quoting.
-      const cli = path.join(path.dirname(p), "node_modules", "@anthropic-ai", "claude-code", "cli.js");
+      // Newer packages ship a native claude.exe in the package instead of cli.js.
+      const pkg = path.join(path.dirname(p), "node_modules", "@anthropic-ai", "claude-code");
+      const cli = path.join(pkg, "cli.js");
       if (fs.existsSync(cli)) return { command: process.execPath, args: [cli] };
+      for (const exe of [path.join(pkg, "bin", "claude.exe"), path.join(pkg, "claude.exe")]) {
+        if (fs.existsSync(exe)) return { command: exe, args: [] };
+      }
       continue;
     }
     if (WIN && !/\.exe$/i.test(p)) continue;
     return { command: p, args: [] };
   }
+  // Fall back to what an earlier install of the bridge found, if it's still there.
+  try {
+    const prev = JSON.parse(fs.readFileSync(path.join(INSTALL_DIR, "config.json"), "utf8")).claude;
+    if (prev && prev.command && fs.existsSync(prev.command) && (prev.args || []).every((a) => fs.existsSync(a))) return prev;
+  } catch { /* no earlier install */ }
   return null;
 }
 
@@ -119,10 +131,10 @@ function uninstall() {
 }
 
 function install() {
+  // The game blocker works without Claude Code, so install anyway and say so.
   const claude = findClaude();
   if (!claude) {
-    console.error("Couldn't find Claude Code. Install it (https://claude.com/claude-code), run `claude` once to sign in, then run this again.");
-    process.exit(1);
+    console.error("Couldn't find Claude Code, so hints won't work yet. Install it (https://claude.com/claude-code), run `claude` once to sign in, then run this again. Installing the game blocker anyway.");
   }
   fs.mkdirSync(INSTALL_DIR, { recursive: true });
   for (const f of ["host.js", "gameguard.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(INSTALL_DIR, f));
@@ -155,12 +167,13 @@ function install() {
   if (WIN) execFileSync("reg", ["add", REG_KEY, "/ve", "/t", "REG_SZ", "/d", manifestPath, "/f"], { stdio: "ignore" });
 
   console.log(`Installed. Firefox will run: ${launcher}`);
-  console.log(`Using Claude Code at: ${[claude.command, ...claude.args].join(" ")}`);
+  if (claude) console.log(`Using Claude Code at: ${[claude.command, ...claude.args].join(" ")}`);
   const g = setUpGuard();
   if (g.ok) console.log("Game blocker is running. Games stay closed until today's task is done (change the list in the extension settings).");
   else console.error("Couldn't set the game blocker to start with Windows. It still runs now, and the bridge restarts it while Firefox is open.");
   if (!g.admin) console.log("Tip: run this from an administrator terminal so the blocker can also close games that run as administrator, like the League client.");
 
+  if (!claude) { process.exitCode = 1; return; }
   // Quick check that Claude Code runs and is signed in.
   const { handle } = require(path.join(INSTALL_DIR, "host.js"));
   console.log("Checking Claude Code (sends one tiny message)…");
