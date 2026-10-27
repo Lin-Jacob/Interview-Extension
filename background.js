@@ -271,8 +271,24 @@ function blockedPageUrl(target) {
   return browser.runtime.getURL(`pages/blocked.html?u=${encodeURIComponent(target)}`);
 }
 
+// The bridge's game blocker opens this leetcode.com address after closing a
+// game (native/gameguard.js taskPageUrl); show today's task instead.
+const TASK_PAGE_MARKER = "lcdl-game";
+
+function gamePageFor(url) {
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  if (u.hostname !== "leetcode.com" || !u.searchParams.has(TASK_PAGE_MARKER)) return null;
+  return browser.runtime.getURL(`pages/blocked.html?g=${encodeURIComponent(u.searchParams.get(TASK_PAGE_MARKER) || "Games")}`);
+}
+
 browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return;
+  const gamePage = gamePageFor(details.url);
+  if (gamePage) {
+    browser.tabs.update(details.tabId, { url: gamePage });
+    return;
+  }
   if (await shouldBlock(details.url)) {
     browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url) });
   }

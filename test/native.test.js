@@ -165,7 +165,8 @@ test("game blocker leaves games that were already open, and closes new launches"
   const launch = (file) => { const c = spawn(file, ["60"], { stdio: "ignore" }); started.push(c); return c; };
   const today = guard.dateKey();
   const blocked = { date: today, done: false, processes: ["fakegame-lcdl", "fakeclient-lcdl"] };
-  const check = (state) => guard.checkOnce({ state, sessionPath });
+  const shown = [];
+  const check = (state) => guard.checkOnce({ state, sessionPath, onClosed: (hits) => shown.push(hits.map((h) => h.pid)) });
   try {
     const open = launch(exe);
     await new Promise((r) => setTimeout(r, 100));
@@ -177,6 +178,7 @@ test("game blocker leaves games that were already open, and closes new launches"
     await new Promise((r) => setTimeout(r, 100));
     let hits = await check(blocked);
     assert.deepStrictEqual(hits.map((h) => h.pid), [fresh.pid], "a new launch is closed");
+    assert.deepStrictEqual(shown, [[fresh.pid]], "today's task opens after closing a game");
     assert.ok(alive(open.pid));
 
     // A kept client starting a game from its own folder is part of that session.
@@ -255,4 +257,11 @@ test("installer sets up the game blocker even without Claude Code", { skip: proc
   const u = spawnSync(process.execPath, [path.join(__dirname, "..", "native", "install.js"), "--uninstall"], { env, encoding: "utf8" });
   assert.strictEqual(u.status, 0);
   assert.ok(waitFor(() => !alive(hb.pid)));
+});
+
+test("the task page names the game that was closed", () => {
+  assert.strictEqual(guard.gameLabel([{ name: "steamwebhelper.exe" }, { name: "steam.exe" }]), "Steam");
+  assert.strictEqual(guard.gameLabel([{ name: "LeagueClientUx.exe" }]), "League of Legends");
+  assert.strictEqual(guard.gameLabel([{ name: "Hades.exe" }]), "Hades");
+  assert.strictEqual(guard.taskPageUrl("League of Legends"), "https://leetcode.com/?lcdl-game=League%20of%20Legends");
 });

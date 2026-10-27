@@ -462,3 +462,13 @@ test("missing bridge is reported on the settings page, not thrown", async () => 
   const st = await env.msg({ type: "getState" });
   assert.match(st.gameGuard.error, /bridge isn't installed/);
 });
+
+test("the game blocker's leetcode.com link opens the finish-your-task page", async () => {
+  const env = makeEnv();
+  env.tabUpdates.length = 0;
+  await env.listeners.nav({ frameId: 0, tabId: 9, url: "https://leetcode.com/?lcdl-game=League%20of%20Legends" });
+  assert.deepStrictEqual(env.tabUpdates, [{ id: 9, url: "moz-extension://test/pages/blocked.html?g=League%20of%20Legends" }]);
+  env.tabUpdates.length = 0;
+  await env.listeners.nav({ frameId: 0, tabId: 9, url: "https://leetcode.com/problems/two-sum/" });
+  assert.deepStrictEqual(env.tabUpdates, []);
+});
