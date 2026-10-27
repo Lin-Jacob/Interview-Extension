@@ -96,6 +96,7 @@ function showGameStatus(on, g) {
   if (!on) { el.textContent = "Game blocking is off."; return; }
   if (!g) { el.textContent = "Not reported to the bridge yet."; return; }
   if (g.error) { el.textContent = `Game blocker not reachable: ${g.error}`; el.className = "small error"; return; }
+  if (g.tabError) { el.textContent = `Couldn't open today's task after closing a game: ${g.tabError}`; el.className = "small error"; return; }
   const when = new Date(g.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   el.textContent = `Game blocker ${g.guard === "started" ? "started" : "running"} at ${when}. Games are ${g.done ? "allowed: today's task is done" : "closed until today's task is done"}.`;
   el.className = g.done ? "small done" : "small muted";
