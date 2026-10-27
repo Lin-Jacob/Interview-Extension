@@ -1,12 +1,22 @@
 /* global isCoding, send, el, todayItems, progressText */
 
-const target = new URLSearchParams(location.search).get("u") || "";
+const params = new URLSearchParams(location.search);
+const target = params.get("u") || "";
+const game = params.get("g"); // set when the game blocker closed a game
 let host = "";
 try { host = new URL(target).hostname; } catch { /* leave blank */ }
-document.getElementById("site").textContent = host || "This site";
+document.getElementById("site").textContent = game || host || "This site";
+if (game) {
+  document.title = "Finish today's task first";
+  document.querySelector("h1").textContent = "Finish today's task first, then play.";
+  document.getElementById("closedNote").hidden = false;
+}
 
 function render(st) {
   const p = st.progress;
+  if (game) document.getElementById("closedNote").textContent = p.done
+    ? `Today's task is done, so ${game} can open now.`
+    : `${game} was closed. It can open once today's task is done.`;
   if (p.done && /^https?:/.test(target)) {
     location.replace(target);
     return;

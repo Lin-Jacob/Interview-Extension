@@ -136,7 +136,7 @@ function partOfGame(child, parent) {
 // Games already open when blocking starts (at midnight, when it's turned on,
 // or when the blocker is installed) keep running until closed; anything
 // opened after that is closed. Returns the processes it closed.
-async function checkOnce({ state = readJson(STATE_PATH, null), now = Date.now(), sessionPath = SESSION_PATH } = {}) {
+async function checkOnce({ state = readJson(STATE_PATH, null), now = Date.now(), sessionPath = SESSION_PATH, onClosed = showTask } = {}) {
   const session = readJson(sessionPath, null);
   if (gamesAllowed(state, now)) {
     if (!session || session.blocking) writeJson(sessionPath, { blocking: false, procs: [] });
@@ -168,8 +168,40 @@ async function checkOnce({ state = readJson(STATE_PATH, null), now = Date.now(),
   writeJson(sessionPath, { blocking: true, procs: [...kept.values()].map(({ pid, name, path: p }) => ({ pid, name, path: p })) });
   const hits = games.filter((p) => !kept.has(key(p)));
   await kill(hits.map((p) => p.pid));
-  if (hits.length) log(`closed ${hits.map((p) => `${p.name} (${p.pid})`).join(", ")}: today's task isn't done yet`);
+  if (hits.length) {
+    log(`closed ${hits.map((p) => `${p.name} (${p.pid})`).join(", ")}: today's task isn't done yet`);
+    onClosed(hits, now);
+  }
   return hits;
+}
+
+const FRIENDLY = {
+  steam: "Steam", epicgameslauncher: "Epic Games", riotclientservices: "Riot Client", "riot client": "Riot Client",
+  leagueclient: "League of Legends", leagueclientux: "League of Legends", "league of legends": "League of Legends", valorant: "VALORANT"
+};
+function gameLabel(hits) {
+  const names = hits.map((p) => stripExe(p.name || ""));
+  const known = names.find((n) => FRIENDLY[n]);
+  return known ? FRIENDLY[known] : (hits[0].name || "Game").replace(/\.exe$/i, "");
+}
+
+// The extension turns this leetcode.com address into its "finish today's task
+// first" page, which lists today's task (background.js, TASK_PAGE_MARKER).
+function taskPageUrl(label) {
+  return `https://leetcode.com/?lcdl-game=${encodeURIComponent(label)}`;
+}
+
+// Opens today's task in the browser after closing a game, at most once a
+// minute so a launcher that keeps retrying doesn't flood it with tabs.
+let lastShown = 0;
+function showTask(hits, now = Date.now()) {
+  if (now - lastShown < 60 * 1000) return;
+  lastShown = now;
+  const url = taskPageUrl(gameLabel(hits));
+  // explorer.exe opens it in the default browser as the signed-in user, even
+  // when the blocker itself runs as administrator.
+  const [cmd, args] = WIN ? ["explorer.exe", [url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
+  execFile(cmd, args, { windowsHide: true }, () => {});
 }
 
 function writeJson(p, data) {
@@ -210,5 +242,5 @@ async function main() {
 if (require.main === module) main();
 module.exports = {
   DEFAULT_GAMES, STATE_PATH, HEARTBEAT_PATH, SESSION_PATH, dateKey, partOfGame, gamesAllowed, compileRules, matches,
-  listProcesses, checkOnce, otherGuardRunning
+  listProcesses, checkOnce, otherGuardRunning, gameLabel, taskPageUrl
 };
