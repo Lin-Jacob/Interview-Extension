@@ -73,20 +73,35 @@ function setUpGuard() {
   const guard = path.join(INSTALL_DIR, "gameguard.js");
   if (!WIN) {
     spawn(process.execPath, [guard], { detached: true, stdio: "ignore" }).unref();
-    return true;
+    return { ok: true, admin: true };
   }
   const vbs = path.join(INSTALL_DIR, "gameguard.vbs");
   const q = (p) => `""${p}""`;
   fs.writeFileSync(vbs, `CreateObject("WScript.Shell").Run "${q(process.execPath)} ${q(guard)}", 0, False\r\n`);
-  let ok = true;
+  // From an administrator terminal the task runs with full rights, so it can
+  // also close games that run as administrator (the League client does).
+  // A non-elevated copy from the Startup folder would block it, so skip that.
+  const admin = isAdmin();
+  const create = ["/create", "/f", "/sc", "minute", "/mo", "5", "/tn", GUARD_TASK, "/tr", `wscript.exe "${vbs}"`];
+  if (admin) create.push("/rl", "highest");
+  let ok = spawnSync("schtasks", create, { stdio: "ignore" }).status === 0;
+  if (admin) {
+    fs.rmSync(STARTUP_FILE, { force: true });
+    if (ok) ok = spawnSync("schtasks", ["/run", "/tn", GUARD_TASK], { stdio: "ignore" }).status === 0;
+    if (!ok) spawnSync("wscript.exe", [vbs], { stdio: "ignore" });
+    return { ok, admin };
+  }
   try {
     fs.mkdirSync(STARTUP_DIR, { recursive: true });
     fs.copyFileSync(vbs, STARTUP_FILE);
   } catch { ok = false; }
-  const task = spawnSync("schtasks", ["/create", "/f", "/sc", "minute", "/mo", "5", "/tn", GUARD_TASK, "/tr", `wscript.exe "${vbs}"`], { stdio: "ignore" });
-  if (task.status !== 0) ok = false;
   spawnSync("wscript.exe", [vbs], { stdio: "ignore" });
-  return ok;
+  return { ok, admin };
+}
+
+// `net session` only succeeds in an elevated (administrator) terminal.
+function isAdmin() {
+  return spawnSync("net", ["session"], { stdio: "ignore", windowsHide: true }).status === 0;
 }
 
 function uninstall() {
@@ -141,8 +156,10 @@ function install() {
 
   console.log(`Installed. Firefox will run: ${launcher}`);
   console.log(`Using Claude Code at: ${[claude.command, ...claude.args].join(" ")}`);
-  if (setUpGuard()) console.log("Game blocker is running. Games stay closed until today's task is done (change the list in the extension settings).");
+  const g = setUpGuard();
+  if (g.ok) console.log("Game blocker is running. Games stay closed until today's task is done (change the list in the extension settings).");
   else console.error("Couldn't set the game blocker to start with Windows. It still runs now, and the bridge restarts it while Firefox is open.");
+  if (!g.admin) console.log("Tip: run this from an administrator terminal so the blocker can also close games that run as administrator, like the League client.");
 
   // Quick check that Claude Code runs and is signed in.
   const { handle } = require(path.join(INSTALL_DIR, "host.js"));
