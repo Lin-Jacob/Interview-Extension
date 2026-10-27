@@ -2,10 +2,11 @@
 // One-time setup for the LeetCode Daily Lock Claude Code bridge.
 //   node install.js            install (or update)
 //   node install.js --uninstall
-// Copies host.js to ~/.leetcode-daily-lock/bridge, records where `claude` is,
-// and registers the bridge with Firefox for this user only.
+// Copies host.js and gameguard.js to ~/.leetcode-daily-lock/bridge, records
+// where `claude` is, registers the bridge with Firefox for this user only, and
+// sets up the game blocker to run in the background.
 "use strict";
-const { execFileSync, spawnSync } = require("child_process");
+const { execFileSync, spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -16,6 +17,9 @@ const HOME = os.homedir();
 const INSTALL_DIR = path.join(HOME, ".leetcode-daily-lock", "bridge");
 const WIN = process.platform === "win32";
 const REG_KEY = `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`;
+const GUARD_TASK = "LeetCode Daily Lock game blocker";
+const STARTUP_DIR = path.join(process.env.APPDATA || path.join(HOME, "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+const STARTUP_FILE = path.join(STARTUP_DIR, "LeetCode Daily Lock game blocker.vbs");
 
 function manifestDir() {
   if (process.platform === "darwin") return path.join(HOME, "Library", "Application Support", "Mozilla", "NativeMessagingHosts");
@@ -48,12 +52,53 @@ function findClaude() {
   return null;
 }
 
+// Stops a running game blocker, using the heartbeat file it keeps.
+function stopGuard() {
+  const hbPath = path.join(HOME, ".leetcode-daily-lock", "gameguard.json");
+  try {
+    const { pid } = JSON.parse(fs.readFileSync(hbPath, "utf8"));
+    if (pid) process.kill(pid);
+  } catch { /* not running */ }
+  fs.rmSync(hbPath, { force: true });
+}
+
+// Windows: a hidden launcher, run at sign-in (Startup folder) and every 5
+// minutes by Task Scheduler, so the blocker comes back if it's ended. A second
+// copy exits right away when one is already running. Elsewhere the bridge
+// starts it whenever Firefox reports progress.
+function setUpGuard() {
+  stopGuard();
+  const guard = path.join(INSTALL_DIR, "gameguard.js");
+  if (!WIN) {
+    spawn(process.execPath, [guard], { detached: true, stdio: "ignore" }).unref();
+    return true;
+  }
+  const vbs = path.join(INSTALL_DIR, "gameguard.vbs");
+  const q = (p) => `""${p}""`;
+  fs.writeFileSync(vbs, `CreateObject("WScript.Shell").Run "${q(process.execPath)} ${q(guard)}", 0, False\r\n`);
+  let ok = true;
+  try {
+    fs.mkdirSync(STARTUP_DIR, { recursive: true });
+    fs.copyFileSync(vbs, STARTUP_FILE);
+  } catch { ok = false; }
+  const task = spawnSync("schtasks", ["/create", "/f", "/sc", "minute", "/mo", "5", "/tn", GUARD_TASK, "/tr", `wscript.exe "${vbs}"`], { stdio: "ignore" });
+  if (task.status !== 0) ok = false;
+  spawnSync("wscript.exe", [vbs], { stdio: "ignore" });
+  return ok;
+}
+
 function uninstall() {
+  if (WIN) {
+    spawnSync("schtasks", ["/delete", "/f", "/tn", GUARD_TASK], { stdio: "ignore" });
+    fs.rmSync(STARTUP_FILE, { force: true });
+  }
+  stopGuard();
+  fs.rmSync(path.join(HOME, ".leetcode-daily-lock", "games.json"), { force: true });
   const manifest = path.join(manifestDir(), `${HOST_NAME}.json`);
   if (fs.existsSync(manifest)) fs.unlinkSync(manifest);
   if (WIN) spawnSync("reg", ["delete", REG_KEY, "/f"], { stdio: "ignore" });
   fs.rmSync(INSTALL_DIR, { recursive: true, force: true });
-  console.log("Removed the LeetCode Daily Lock bridge.");
+  console.log("Removed the LeetCode Daily Lock bridge and game blocker.");
 }
 
 function install() {
@@ -63,7 +108,7 @@ function install() {
     process.exit(1);
   }
   fs.mkdirSync(INSTALL_DIR, { recursive: true });
-  fs.copyFileSync(path.join(__dirname, "host.js"), path.join(INSTALL_DIR, "host.js"));
+  for (const f of ["host.js", "gameguard.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(INSTALL_DIR, f));
   // Record this terminal's PATH (plus node's folder) for the bridge to reuse.
   const pathValue = [path.dirname(process.execPath), process.env.PATH].filter(Boolean).join(path.delimiter);
   const config = { claude, path: pathValue };
@@ -94,6 +139,8 @@ function install() {
 
   console.log(`Installed. Firefox will run: ${launcher}`);
   console.log(`Using Claude Code at: ${[claude.command, ...claude.args].join(" ")}`);
+  if (setUpGuard()) console.log("Game blocker is running. Games stay closed until today's task is done (change the list in the extension settings).");
+  else console.error("Couldn't set the game blocker to start with Windows. It still runs now, and the bridge restarts it while Firefox is open.");
 
   // Quick check that Claude Code runs and is signed in.
   const { handle } = require(path.join(INSTALL_DIR, "host.js"));

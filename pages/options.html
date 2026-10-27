@@ -39,6 +39,18 @@
         <textarea id="blockedSites" spellcheck="false"></textarea>
       </label>
 
+      <h2 style="margin-top:24px">Games on this computer</h2>
+      <label class="row">
+        <input type="checkbox" id="blockGames">
+        <span style="flex:1">Close games and game launchers until today's task is done</span>
+      </label>
+      <p class="small muted" style="margin:4px 0 0 24px">Needs the Claude Code bridge below (run <code>node install.js</code> again after updating it). It checks every 10 seconds, starts with Windows, and keeps games closed on days Firefox hasn't reported the task as done.</p>
+      <label class="field">Games to close
+        <span class="hint">One per line. A program name like <code>steam.exe</code>, or a folder like <code>\steamapps\common\</code> to close everything installed there.</span>
+        <textarea id="blockedGames" spellcheck="false"></textarea>
+      </label>
+      <p id="gameStatus" class="small muted"></p>
+
       <h2 style="margin-top:24px">Claude help</h2>
       <label class="field">How hints reach Claude
         <select id="helpMode">

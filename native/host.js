@@ -2,9 +2,10 @@
 // Native messaging host for LeetCode Daily Lock. Firefox starts it for each
 // hint, sends one length-prefixed JSON message on stdin, and reads one reply on
 // stdout. It answers by running Claude Code (`claude -p`), which uses whatever
-// account Claude Code is signed in with, such as a Pro plan.
+// account Claude Code is signed in with, such as a Pro plan. It also passes
+// today's progress to the game blocker (gameguard.js) and keeps it running.
 "use strict";
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -12,6 +13,7 @@ const path = require("path");
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const WORK_DIR = path.join(os.homedir(), ".leetcode-daily-lock", "workspace");
 const TIMEOUT_MS = 5 * 60 * 1000;
+const GUARD_TASK = "LeetCode Daily Lock game blocker";
 
 function loadConfig() {
   try {
@@ -72,7 +74,32 @@ function run(command, args, { input = "", cwd, env, timeoutMs = TIMEOUT_MS } = {
   });
 }
 
+// Saves what the extension reported for gameguard.js, then starts the guard if
+// it isn't running (for example after it was ended in Task Manager).
+function reportGames(msg) {
+  const guard = require(path.join(__dirname, "gameguard.js"));
+  const state = {
+    date: String(msg.date || ""),
+    done: !!msg.done,
+    enabled: msg.enabled !== false,
+    processes: Array.isArray(msg.processes) ? msg.processes.map(String) : guard.DEFAULT_GAMES,
+    updatedAt: Date.now()
+  };
+  fs.mkdirSync(path.dirname(guard.STATE_PATH), { recursive: true });
+  fs.writeFileSync(guard.STATE_PATH, JSON.stringify(state, null, 2));
+  if (guard.otherGuardRunning()) return { guard: "running" };
+  // On Windows, Firefox closes everything the bridge starts when the bridge
+  // exits, so ask Task Scheduler (set up by install.js) to start it instead.
+  if (process.platform === "win32" && spawnSync("schtasks", ["/run", "/tn", GUARD_TASK], { windowsHide: true, stdio: "ignore" }).status === 0) {
+    return { guard: "started" };
+  }
+  const child = spawn(process.execPath, [path.join(__dirname, "gameguard.js")], { detached: true, stdio: "ignore", windowsHide: true });
+  child.unref();
+  return { guard: "started" };
+}
+
 async function handle(msg, config = loadConfig()) {
+  if (msg.type === "games") return reportGames(msg);
   const { command, args: baseArgs = [] } = config.claude;
   const env = childEnv(process.env, config);
   fs.mkdirSync(WORK_DIR, { recursive: true });
@@ -136,4 +163,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { buildArgs, childEnv, parseResult, handle };
+module.exports = { buildArgs, childEnv, parseResult, handle, GUARD_TASK };

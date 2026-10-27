@@ -23,6 +23,7 @@ const STORAGE_DEFAULTS = {
   lessonLog: {},      // { lessonId: [{ ts, score }] } graded system design quizzes
   behavioralLog: {},  // { questionId: [{ ts, score }] } graded behavioral answers
   learnSessions: {},  // "design:<id>" / "behavioral:<id>" -> lesson text, answers, grade, Claude conversation
+  gameGuard: null,    // last report to the game blocker: { at, enabled, done, guard, error }
   migrations: {}
 };
 
@@ -292,6 +293,23 @@ async function afterStateChange() {
   const today = Core.dateKey();
   if (p.done && !s.practiceDays[today]) await save({ practiceDays: { ...s.practiceDays, [today]: p.type } });
   if (!p.done) await sweepTabs();
+  await reportGames(s.settings, p, s.gameGuard);
+}
+
+// Tells the bridge's game blocker whether games are allowed today. Sent on
+// every sync too, which also restarts the blocker if it was closed. Once
+// blocking is off, one last report tells the blocker to stand down.
+async function reportGames(settings, p, last) {
+  const enabled = !!settings.blockGames;
+  if (!enabled && !(last && last.enabled)) return;
+  const report = { at: Date.now(), enabled, done: p.done };
+  try {
+    const r = await nativeCall({ type: "games", date: Core.dateKey(), done: p.done, enabled, processes: Core.parseGameList(settings.blockedGames) });
+    report.guard = r.guard || "";
+  } catch (e) {
+    report.error = e.message;
+  }
+  await save({ gameGuard: report });
 }
 
 // ---------- help (Claude) ----------
@@ -742,6 +760,7 @@ async function getState() {
     attempts: Object.values(s.attempts).sort((a, b) => b.startedAt - a.startedAt).slice(0, 50),
     lastSync: s.lastSync,
     syncError: s.syncError,
+    gameGuard: s.gameGuard,
     username: s.resolvedUsername
   };
 }
@@ -751,6 +770,8 @@ async function saveSettings(patch) {
   const settings = { ...s.settings, ...patch };
   if (patch.apiKey === undefined) settings.apiKey = s.settings.apiKey;
   settings.blockedSites = Core.parseSiteList(settings.blockedSites);
+  settings.blockedGames = Core.parseGameList(settings.blockedGames);
+  settings.blockGames = !!settings.blockGames;
   if (!["claudeai", "claudecode", "api"].includes(settings.helpMode)) settings.helpMode = "claudecode";
   settings.dailyGoal = Math.min(10, Math.max(1, Number(settings.dailyGoal) || 1));
   if (!Array.isArray(settings.schedule) || settings.schedule.length !== 7) settings.schedule = Core.DEFAULT_SETTINGS.schedule;

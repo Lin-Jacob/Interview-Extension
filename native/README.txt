@@ -1,7 +1,9 @@
 LeetCode Daily Lock - Claude Code bridge
 
 Lets the extension ask Claude Code on this computer for hints, so they use
-your Claude Pro plan and the answer appears in the LeetCode panel.
+your Claude Pro plan and the answer appears in the LeetCode panel. It also
+installs the game blocker, which closes Steam, Epic, Riot and any games you
+list in the extension settings until today's task is done.
 
 1. Install Claude Code (https://claude.com/claude-code), run `claude` once,
    and sign in with your Pro account.
@@ -9,3 +11,4 @@ your Claude Pro plan and the answer appears in the LeetCode panel.
 3. Restart Firefox, then in the extension settings click "Test connection".
 
 Remove it with:           node install.js --uninstall
+(This also removes the game blocker.)

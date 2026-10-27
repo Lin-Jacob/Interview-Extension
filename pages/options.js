@@ -49,6 +49,9 @@ function fill(st) {
   $("username").placeholder = st.username ? `Signed in as ${st.username}` : "";
   $("dailyGoal").value = s.dailyGoal;
   $("blockedSites").value = (s.blockedSites || []).join("\n");
+  $("blockGames").checked = !!s.blockGames;
+  $("blockedGames").value = (s.blockedGames || []).join("\n");
+  showGameStatus(s.blockGames, st.gameGuard);
   $("apiKey").value = "";
   $("apiKey").placeholder = s.hasApiKey ? "Saved. Paste a new key to replace it." : "sk-ant-...";
   $("model").value = s.model;
@@ -67,6 +70,8 @@ $("form").addEventListener("submit", async (e) => {
     dailyGoal: Number($("dailyGoal").value),
     schedule: DAYS.map((_, i) => $(`day${i}`).value),
     blockedSites: $("blockedSites").value,
+    blockGames: $("blockGames").checked,
+    blockedGames: $("blockedGames").value,
     model: $("model").value,
     helpMode: $("helpMode").value,
     hintsBeforeSolution: Number($("hintsBeforeSolution").value),
@@ -84,6 +89,17 @@ $("form").addEventListener("submit", async (e) => {
     $("saved").textContent = err.message;
   }
 });
+
+function showGameStatus(on, g) {
+  const el = $("gameStatus");
+  el.className = "small muted";
+  if (!on) { el.textContent = "Game blocking is off."; return; }
+  if (!g) { el.textContent = "Not reported to the bridge yet."; return; }
+  if (g.error) { el.textContent = `Game blocker not reachable: ${g.error}`; el.className = "small error"; return; }
+  const when = new Date(g.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  el.textContent = `Game blocker ${g.guard === "started" ? "started" : "running"} at ${when}. Games are ${g.done ? "allowed: today's task is done" : "closed until today's task is done"}.`;
+  el.className = g.done ? "small done" : "small muted";
+}
 
 function showApiFields() {
   $("apiFields").hidden = $("helpMode").value !== "api";

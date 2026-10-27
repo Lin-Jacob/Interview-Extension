@@ -37,6 +37,18 @@ so later hints build on earlier ones. Claude Code runs with all tools turned off
 (`~/.leetcode-daily-lock/workspace`), so it only talks and never touches your files.
 To remove it: `node install.js --uninstall`.
 
+## Game blocker (Windows)
+The bridge install also sets up a small background program (`gameguard.js`) that closes games and game
+launchers until today's task is done. By default it closes Steam, Epic Games Launcher, the Riot Client,
+League of Legends and VALORANT, plus anything installed under `\steamapps\common\`, `\Epic Games\`
+or `\Riot Games\`. Edit the list or turn it off in the extension settings (a program name like
+`minecraft.exe`, or a folder). It checks every 10 seconds, starts when you sign in to Windows, and Task
+Scheduler restarts it every 5 minutes if it's closed. Firefox tells it about your progress through the
+bridge, so on a day Firefox hasn't reported the task as done, games stay closed. At midnight a new day
+starts and games close again until that day's task is done. A log of what it closed is in
+`~/.leetcode-daily-lock/gameguard.log`. It isn't tamper-proof: deleting the scheduled task or
+uninstalling the bridge turns it off.
+
 Other options in settings: **Open claude.ai** copies the prompt and opens a claude.ai tab for you to paste
 into, and **API key** answers in the panel and is billed per use.
 

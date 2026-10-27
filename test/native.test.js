@@ -7,8 +7,19 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const host = require("../native/host.js");
+const guard = require("../native/gameguard.js");
 
 const HOST_JS = path.join(__dirname, "..", "native", "host.js");
+const GUARD_JS = path.join(__dirname, "..", "native", "gameguard.js");
+
+const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function waitFor(fn, ms = 5000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { const v = fn(); if (v) return v; sleepMs(25); }
+  return null;
+}
+const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 function frame(obj) {
   const body = Buffer.from(JSON.stringify(obj));
@@ -106,8 +117,77 @@ test("installer registers the host for Firefox and uninstalls cleanly", { skip: 
   const out = spawnSync(manifest.path, [], { input: frame({ type: "ping" }), env: { HOME: home, PATH: "/usr/bin:/bin" } });
   assert.deepStrictEqual(unframe(out.stdout), { ok: true, version: "9.9.9 (Claude Code)" });
 
+  // The game blocker was started and keeps a heartbeat.
+  const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
+  assert.ok(hb && alive(hb.pid), "game blocker running after install");
+
   const u = spawnSync(process.execPath, [path.join(__dirname, "..", "native", "install.js"), "--uninstall"], { env, encoding: "utf8" });
   assert.strictEqual(u.status, 0);
+  assert.ok(waitFor(() => !alive(hb.pid)), "uninstall stops the game blocker");
   assert.ok(!fs.existsSync(path.join(manifestDir, "leetcode_daily_lock_claude.json")));
   assert.ok(!fs.existsSync(path.join(home, ".leetcode-daily-lock", "bridge")));
+});
+
+test("games are allowed only after today's task is reported done, or with blocking off", () => {
+  const now = new Date(2026, 9, 27, 15).getTime();
+  assert.strictEqual(guard.gamesAllowed(null, now), false);
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", done: false }, now), false);
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", done: true }, now), true);
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-26", done: true }, now), false, "yesterday's report doesn't count");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-26", done: false, enabled: false }, now), true);
+});
+
+test("game rules match program names and install folders", () => {
+  const rules = guard.compileRules(guard.DEFAULT_GAMES.concat(["minecraft", "D:/Games/"]));
+  const m = (name, p = "") => guard.matches({ name, path: p }, rules);
+  assert.ok(m("Steam.exe"));
+  assert.ok(m("VALORANT.exe", "C:\\Riot Games\\VALORANT\\live\\VALORANT.exe"));
+  assert.ok(m("eldenring.exe", "E:\\SteamLibrary\\steamapps\\common\\ELDEN RING\\Game\\eldenring.exe"));
+  assert.ok(m("Fortnite.exe", "C:\\Program Files\\Epic Games\\Fortnite\\Fortnite.exe"));
+  assert.ok(m("minecraft.exe"));
+  assert.ok(m("x.exe", "d:\\games\\x\\x.exe"));
+  assert.ok(!m("firefox.exe", "C:\\Program Files\\Mozilla Firefox\\firefox.exe"));
+  assert.ok(!m("Code.exe", "C:\\Users\\j\\steamapps-notes\\Code.exe"));
+});
+
+test("game blocker closes a running game until the task is done", { skip: process.platform === "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-game-"));
+  const exe = path.join(dir, "fakegame-lcdl");
+  fs.copyFileSync(fs.realpathSync("/bin/sleep"), exe);
+  fs.chmodSync(exe, 0o755);
+  const game = require("node:child_process").spawn(exe, ["60"], { stdio: "ignore" });
+  const exited = new Promise((r) => game.on("exit", r));
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    const today = guard.dateKey();
+    let hits = await guard.checkOnce({ state: { date: today, done: true, processes: ["fakegame-lcdl"] } });
+    assert.deepStrictEqual(hits, []);
+    hits = await guard.checkOnce({ state: { date: today, done: false, processes: ["notthis.exe"] } });
+    assert.deepStrictEqual(hits, []);
+    hits = await guard.checkOnce({ state: { date: today, done: false, processes: [dir + "/"] } });
+    assert.deepStrictEqual(hits.map((h) => h.pid), [game.pid]);
+    await exited;
+  } finally {
+    try { game.kill("SIGKILL"); } catch { /* gone */ }
+  }
+});
+
+test("bridge saves the game report and starts the blocker", { skip: process.platform === "win32" }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-host-"));
+  for (const f of [HOST_JS, GUARD_JS]) fs.copyFileSync(f, path.join(dir, path.basename(f)));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-home-"));
+  const run = (msg) => unframe(spawnSync(process.execPath, [path.join(dir, "host.js")], { input: frame(msg), env: { ...process.env, HOME: home } }).stdout);
+  const out = run({ type: "games", date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"] });
+  assert.deepStrictEqual(out, { ok: true, guard: "started" });
+  const state = readJson(path.join(home, ".leetcode-daily-lock", "games.json"));
+  assert.deepStrictEqual({ ...state, updatedAt: 0 }, { date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"], updatedAt: 0 });
+  const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
+  try {
+    assert.ok(hb && alive(hb.pid));
+    // A second report finds it running instead of starting another.
+    assert.deepStrictEqual(run({ type: "games", date: "2026-10-27", done: true, enabled: true }), { ok: true, guard: "running" });
+    assert.deepStrictEqual(readJson(path.join(home, ".leetcode-daily-lock", "games.json")).processes, guard.DEFAULT_GAMES);
+  } finally {
+    if (hb) try { process.kill(hb.pid); } catch { /* gone */ }
+  }
 });
