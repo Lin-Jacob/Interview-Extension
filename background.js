@@ -630,10 +630,28 @@ async function converse(convo, { system, prompt, effort = "medium" }) {
 // Pulls a JSON object out of a reply that may have code fences or extra text.
 function parseJsonReply(text) {
   const t = String(text || "").replace(/```(?:json)?/g, "");
-  const a = t.indexOf("{");
   const b = t.lastIndexOf("}");
-  if (a < 0 || b < a) throw new Error("Claude's reply wasn't in the expected format. Try again.");
-  return JSON.parse(t.slice(a, b + 1));
+  // Text before the object can contain braces too, so try each opening brace.
+  for (let a = t.indexOf("{"); a >= 0 && a < b; a = t.indexOf("{", a + 1)) {
+    try { return JSON.parse(t.slice(a, b + 1)); } catch { /* try the next brace */ }
+  }
+  throw new Error("Claude's reply wasn't in the expected format. Try again.");
+}
+
+// One Claude turn for a lesson or grade. In Claude Code mode the call can take
+// longer than Firefox keeps an idle event page alive (which lost the result
+// before it was saved), so the first call returns { ask } and the learn page
+// runs it through the bridge (lib/learnstep.js) and calls again with `reply`.
+async function claudeTurn(convo, { system, prompt }, reply) {
+  if (reply) {
+    if (reply.sessionId) convo.sessionId = reply.sessionId;
+    return { text: String(reply.text || "") };
+  }
+  const { settings } = await load(["settings"]);
+  if (settings.helpMode === "claudecode") {
+    return { ask: { system, prompt, sessionId: convo.sessionId || null, context: convo.context || "" } };
+  }
+  return { text: await converse(convo, { system, prompt }) };
 }
 
 const LESSON_SYSTEM = "You are a senior software engineer at a large tech company. You write short, engaging daily lessons for a new-grad engineer preparing for SWE I/II interviews at major tech companies, covering system design and engineering fundamentals. Be accurate, concrete and practical. The reader knows data structures and algorithms but has little production experience.";
@@ -687,11 +705,11 @@ async function getLearn({ type, id, next }) {
   };
 }
 
-async function generateLesson({ id, review }) {
+async function generateLesson({ id, review, reply }) {
   const lesson = lessonById(id);
   if (!lesson) throw new Error("Unknown lesson.");
   const convo = {};
-  const text = await converse(convo, {
+  const { ask, text } = await claudeTurn(convo, {
     system: LESSON_SYSTEM,
     prompt: [
       `Write today's lesson: "${lesson.title}". Cover: ${lesson.points}.`,
@@ -700,7 +718,8 @@ async function generateLesson({ id, review }) {
       "Then write 3 quiz questions answerable from the reading in a few sentences: one checks understanding, one applies the idea to a scenario, one asks about a trade-off.",
       "Respond with only a JSON object and no code fences: {\"body\": \"<the lesson in Markdown>\", \"questions\": [\"...\", \"...\", \"...\"]}"
     ].filter(Boolean).join("\n\n")
-  });
+  }, reply);
+  if (ask) return { ask };
   const data = parseJsonReply(text);
   if (!data.body || !Array.isArray(data.questions) || !data.questions.length) throw new Error("Claude's lesson was incomplete. Try again.");
   // If the Claude Code conversation is lost before grading, this context lets a new one grade fairly.
@@ -709,12 +728,12 @@ async function generateLesson({ id, review }) {
   return getLearn({ type: "design", id });
 }
 
-async function gradeLesson({ id, answers }) {
+async function gradeLesson({ id, answers, reply }) {
   const { learnSessions } = await load(["learnSessions"]);
   const session = learnSessions[`design:${id}`];
   if (!session || !session.questions) throw new Error("Open the lesson first.");
   const convo = { ...(session.convo || {}) };
-  const text = await converse(convo, {
+  const { ask, text } = await claudeTurn(convo, {
     system: LESSON_SYSTEM,
     prompt: [
       "Here are my answers to the quiz:",
@@ -722,7 +741,8 @@ async function gradeLesson({ id, answers }) {
       "Grade each answer from 0 to 10 for correctness and completeness, like a friendly but honest interviewer. For each, give 1-3 sentences of feedback and a model answer of 2-4 sentences.",
       "Respond with only a JSON object and no code fences: {\"results\": [{\"score\": 0, \"feedback\": \"...\", \"modelAnswer\": \"...\"}], \"summary\": \"one or two sentences: encouragement and what to review\"}"
     ].join("\n\n")
-  });
+ }, reply);
+  if (ask) return { ask };
   const grade = parseJsonReply(text);
   const scores = (grade.results || []).map((r) => Math.max(0, Math.min(10, Number(r.score) || 0)));
   if (!scores.length) throw new Error("Claude's grade was incomplete. Try again.");
@@ -734,12 +754,12 @@ async function gradeLesson({ id, answers }) {
   return getLearn({ type: "design", id });
 }
 
-async function gradeBehavioral({ id, answer }) {
+async function gradeBehavioral({ id, answer, reply }) {
   const q = questionById(id);
   if (!q) throw new Error("Unknown question.");
   if (!String(answer || "").trim()) throw new Error("Write your answer first.");
   const convo = {};
-  const text = await converse(convo, {
+  const { ask, text } = await claudeTurn(convo, {
     system: COACH_SYSTEM,
     prompt: [
       `Interview question: ${q.question}`,
@@ -749,7 +769,8 @@ async function gradeBehavioral({ id, answer }) {
       "List what worked and what to improve (concrete). Then rewrite a stronger version that keeps my facts. Don't invent achievements; use placeholders like [metric] where details are missing.",
       "Respond with only a JSON object and no code fences: {\"score\": 0, \"strengths\": [\"...\"], \"improvements\": [\"...\"], \"improvedAnswer\": \"...\", \"summary\": \"one or two sentences\"}"
     ].join("\n\n")
-  });
+ }, reply);
+  if (ask) return { ask };
   const grade = parseJsonReply(text);
   grade.score = Math.max(0, Math.min(10, Number(grade.score) || 0)) / 10;
   await updateLearnSession(`behavioral:${id}`, { createdAt: Date.now(), answers: [answer], grade, convo });
