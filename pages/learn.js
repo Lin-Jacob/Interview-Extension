@@ -1,4 +1,4 @@
-/* global send, el, Markdown */
+/* global send, el, Markdown, LearnStep */
 // Daily system design lesson + quiz, or a behavioral / communication question.
 // Claude writes the lesson and grades answers through the background page.
 
@@ -151,7 +151,7 @@ function render() {
 async function run(msgType, payload, label) {
   busy = label; error = ""; render();
   try {
-    current = await send({ type: msgType, ...payload });
+    current = await LearnStep.runLearnStep(send, (host, m) => browser.runtime.sendNativeMessage(host, m), { type: msgType, ...payload });
     if (current.grade) clearDrafts();
   } catch (e) { error = e.message; }
   busy = ""; render();

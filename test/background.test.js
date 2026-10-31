@@ -5,6 +5,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const LearnStep = require("../lib/learnstep.js");
 
 const ALL_LEETCODE = Array(7).fill("leetcode");
 
@@ -89,7 +90,9 @@ function makeEnv({ acToday = [], native = null, settings = { dailyGoal: 2, sched
     if (!r.ok) throw new Error(r.error);
     return r.result === undefined ? undefined : JSON.parse(JSON.stringify(r.result)); // cross-realm -> plain
   };
-  return { store, listeners, tabUpdates, claudeCalls, createdTabs, openTabs, nativeCalls, msg, ctx };
+  // What the learn page does: background step, bridge call from the page, reply back.
+  const learn = (m) => LearnStep.runLearnStep(msg, browser.runtime.sendNativeMessage, m);
+  return { store, listeners, tabUpdates, claudeCalls, createdTabs, openTabs, nativeCalls, msg, learn, ctx };
 }
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -320,11 +323,11 @@ test("system design day: lesson, graded quiz, goal met, stats", async () => {
   assert.strictEqual(view.isToday, true);
   assert.strictEqual(view.body, null);
 
-  view = await env.msg({ type: "generateLesson", id: "how-the-web-works" });
+  view = await env.learn({ type: "generateLesson", id: "how-the-web-works" });
   assert.match(view.body, /DNS/);
   assert.strictEqual(view.questions.length, 3);
 
-  view = await env.msg({ type: "gradeLesson", id: "how-the-web-works", answers: ["a", "b", "c"] });
+  view = await env.learn({ type: "gradeLesson", id: "how-the-web-works", answers: ["a", "b", "c"] });
   const grading = env.nativeCalls.filter((c) => c.type === "ask")[1];
   assert.strictEqual(grading.sessionId, "lesson-session", "grading continues the lesson conversation");
   assert.match(grading.prompt, /My answer: b/);
@@ -353,12 +356,39 @@ test("behavioral day: feedback is graded and counts for the day", async () => {
   });
   const st = await env.msg({ type: "getState" });
   assert.strictEqual(st.today.type, "behavioral");
-  await assert.rejects(env.msg({ type: "gradeBehavioral", id: st.today.id, answer: "  " }), /Write your answer/);
-  const view = await env.msg({ type: "gradeBehavioral", id: st.today.id, answer: "I once..." });
+  await assert.rejects(env.learn({ type: "gradeBehavioral", id: st.today.id, answer: "  " }), /Write your answer/);
+  const view = await env.learn({ type: "gradeBehavioral", id: st.today.id, answer: "I once..." });
   assert.strictEqual(view.grade.score, 0.6);
   assert.deepStrictEqual(view.answers, ["I once..."]);
   assert.match(env.nativeCalls.find((c) => c.type === "ask").prompt, /STAR/);
   assert.strictEqual((await env.msg({ type: "getState" })).progress.done, true);
+});
+
+test("behavioral grading: the slow Claude Code call runs from the page, then the answer is saved and the next question comes up", async () => {
+  const env = makeEnv({
+    settings: { dailyGoal: 1, schedule: Array(7).fill("behavioral") },
+    native: learnNative(() => "Here you go {as asked}:\n" + JSON.stringify({ score: 7, strengths: ["clear"], improvements: [], improvedAnswer: "Better {version}.", summary: "Good." }))
+  });
+  const st = await env.msg({ type: "getState" });
+  assert.strictEqual(st.today.id, "tell-me-about-yourself");
+  // The background page doesn't wait on Claude Code itself (Firefox can unload it mid-call).
+  const first = await env.msg({ type: "gradeBehavioral", id: st.today.id, answer: "I'm a CS student..." });
+  assert.match(first.ask.prompt, /Tell me about yourself/);
+  assert.strictEqual(env.nativeCalls.length, 0);
+  assert.deepStrictEqual(env.store.behavioralLog || {}, {});
+
+  const view = await env.learn({ type: "gradeBehavioral", id: st.today.id, answer: "I'm a CS student..." });
+  assert.strictEqual(view.grade.score, 0.7);
+  assert.strictEqual(env.store.behavioralLog["tell-me-about-yourself"].length, 1);
+  const stats = await env.msg({ type: "getStats" });
+  assert.strictEqual(stats.activity[0].type, "behavioral");
+  assert.strictEqual(stats.totals.behavioral, 1);
+
+  // The next behavioral day moves on to the next question.
+  env.store.daily = { ...env.store.daily, date: "2000-01-01" };
+  const next = await env.msg({ type: "getLearn", kind: "behavioral" });
+  assert.notStrictEqual(next.item.id, "tell-me-about-yourself");
+  assert.strictEqual(next.isToday, true);
 });
 
 test("lessons explain what to change in claude.ai mode", async () => {
