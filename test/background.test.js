@@ -365,6 +365,71 @@ test("system design day: lesson, graded quiz, goal met, stats", async () => {
   assert.strictEqual(stats.calendar[stats.calendar.length - 1].design, 1);
 });
 
+test("system design lesson: Ask Claude chat keeps quiz answers back until grading", async () => {
+  const env = makeEnv({
+    settings: { dailyGoal: 1, schedule: Array(7).fill("design") },
+    native: learnNative((m) => {
+      if (m.prompt.includes("Write today's lesson")) return JSON.stringify({ body: "# DNS\nIt resolves names.", questions: ["Q1?", "Q2?", "Q3?"] });
+      if (m.prompt.includes("Here are my answers")) return JSON.stringify({ results: [{ score: 8, feedback: "ok", modelAnswer: "Model one" }, { score: 4, feedback: "f", modelAnswer: "m" }, { score: 9, feedback: "g", modelAnswer: "m" }], summary: "Nice." });
+      return "Chat reply";
+    })
+  });
+  await assert.rejects(env.learn({ type: "lessonChat", id: "how-the-web-works", text: "hi" }), /Open the lesson first/);
+  await env.learn({ type: "generateLesson", id: "how-the-web-works" });
+  await assert.rejects(env.learn({ type: "lessonChat", id: "how-the-web-works", text: "  " }), /Type a question/);
+
+  // The background page hands the Claude Code call to the page.
+  const asks = () => env.nativeCalls.filter((c) => c.type === "ask");
+  const lastAsk = () => asks()[asks().length - 1];
+  const before = asks().length;
+  const first = await env.msg({ type: "lessonChat", id: "how-the-web-works", text: "What is a resolver?" });
+  assert.ok(first.ask);
+  assert.strictEqual(asks().length, before);
+
+  let r = await env.learn({ type: "lessonChat", id: "how-the-web-works", text: "What is a resolver?" });
+  let call = lastAsk();
+  assert.match(call.system, /won't|don't give the answer/);
+  assert.match(call.prompt, /^\[QUIZ NOT GRADED YET\]/);
+  assert.match(call.prompt, /It resolves names/, "a new chat gets the lesson");
+  assert.match(call.prompt, /1\. Q1\?/);
+  assert.notStrictEqual(call.sessionId, "lesson-session", "chat is its own conversation, not the grading one");
+  assert.strictEqual(r.chat.length, 2);
+  assert.strictEqual(r.chat[0].text, "What is a resolver?");
+
+  r = await env.learn({ type: "lessonChat", id: "how-the-web-works", text: "And TTLs?" });
+  call = lastAsk();
+  assert.strictEqual(call.sessionId, "lesson-session");
+  assert.doesNotMatch(call.prompt, /It resolves names/, "a resumed chat doesn't resend the lesson");
+  assert.strictEqual(r.chat.length, 4);
+
+  // Grading still continues the lesson's own conversation, then the chat learns the grade once.
+  await env.learn({ type: "gradeLesson", id: "how-the-web-works", answers: ["a", "b", "c"] });
+  r = await env.learn({ type: "lessonChat", id: "how-the-web-works", text: "Why did I lose points on 2?" });
+  call = lastAsk();
+  assert.match(call.prompt, /^\[QUIZ GRADED\]/);
+  assert.match(call.prompt, /Their answer: b\nScore: 4\/10/);
+  r = await env.learn({ type: "lessonChat", id: "how-the-web-works", text: "Thanks" });
+  call = lastAsk();
+  assert.doesNotMatch(call.prompt, /Their answer/);
+  assert.strictEqual(r.chat.length, 8);
+
+  const view = await env.msg({ type: "getLearn", kind: "design", id: "how-the-web-works" });
+  assert.strictEqual(view.chat.length, 8);
+  assert.strictEqual(view.grade.score, 0.7);
+});
+
+test("system design lesson: chat works through the API key route too", async () => {
+  const env = makeEnv({ settings: { helpMode: "api", apiKey: "sk-test", schedule: Array(7).fill("design") } });
+  env.store.learnSessions = { "design:caching": { createdAt: Date.now(), updatedAt: Date.now(), body: "Cache body", questions: ["Q?"] } };
+  let r = await env.msg({ type: "lessonChat", id: "caching", text: "What is LRU?" });
+  assert.strictEqual(r.chat[1].text, "reply to [QUIZ NOT GRADED YET]");
+  r = await env.msg({ type: "lessonChat", id: "caching", text: "More?" });
+  const last = env.claudeCalls[env.claudeCalls.length - 1];
+  assert.strictEqual(last.messages.length, 3, "API route keeps the chat history");
+  assert.match(last.messages[0].content, /Cache body/);
+  assert.strictEqual(r.chat.length, 4);
+});
+
 test("behavioral day: feedback is graded and counts for the day", async () => {
   const env = makeEnv({
     settings: { dailyGoal: 2, schedule: Array(7).fill("behavioral") },

@@ -709,6 +709,7 @@ async function getLearn({ type, id, next }) {
     isToday: !!(s.daily && s.daily.type === type && s.daily.itemId === itemId),
     body: fresh.body || null, questions: fresh.questions || null,
     answers: fresh.answers || null, grade: fresh.grade || null,
+    chat: fresh.chat || [],
     helpMode: s.settings.helpMode, progress,
     position: type === "design" ? DESIGN_LESSONS.findIndex((l) => l.id === itemId) + 1 : null,
     total: type === "design" ? DESIGN_LESSONS.length : BEHAVIORAL.length
@@ -734,7 +735,7 @@ async function generateLesson({ id, review, reply }) {
   if (!data.body || !Array.isArray(data.questions) || !data.questions.length) throw new Error("Claude's lesson was incomplete. Try again.");
   // If the Claude Code conversation is lost before grading, this context lets a new one grade fairly.
   convo.context = `You wrote this lesson for the student:\n\n${data.body}\n\nQuiz questions:\n${data.questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`;
-  await updateLearnSession(`design:${id}`, { createdAt: Date.now(), body: data.body, questions: data.questions.slice(0, 5), answers: null, grade: null, convo });
+  await updateLearnSession(`design:${id}`, { createdAt: Date.now(), body: data.body, questions: data.questions.slice(0, 5), answers: null, grade: null, convo, chat: null, chatConvo: null });
   return getLearn({ type: "design", id });
 }
 
@@ -762,6 +763,61 @@ async function gradeLesson({ id, answers, reply }) {
   await save({ lessonLog: { ...lessonLog, [id]: (lessonLog[id] || []).concat([{ ts: Date.now(), score: grade.score }]) } });
   await afterStateChange();
   return getLearn({ type: "design", id });
+}
+
+// ---------- Ask Claude beside a system design lesson ----------
+
+const LESSON_CHAT_SYSTEM = [
+  LESSON_SYSTEM,
+  "Right now you are the student's tutor in a chat beside the lesson you wrote for them. Answer their questions about the lesson, system design and related engineering topics directly and briefly (usually under 200 words), in Markdown, with concrete examples. Each student turn starts with a tag that says whether the quiz has been graded.",
+  "[QUIZ NOT GRADED YET]: the student is still working on the quiz, and their own answers are what get graded. Explain any concept from the lesson freely, but if they ask you to answer a quiz question, write their answer, or check whether a draft answer is right, don't give the answer. Instead point them to the part of the lesson that covers it, explain the underlying idea in general terms, or ask a guiding question.",
+  "[QUIZ GRADED]: the quiz is done, so discuss anything, including the model answers, what they missed and why."
+].join("\n\n");
+
+function lessonChatContext(session) {
+  return [
+    `You wrote this lesson for the student:\n\n${session.body}`,
+    `Quiz questions:\n${(session.questions || []).map((q, i) => `${i + 1}. ${q}`).join("\n")}`
+  ].join("\n\n");
+}
+
+function gradeContext(session) {
+  const g = session.grade || {};
+  return "The quiz was just graded. Their answers and grades:\n" + (session.questions || []).map((q, i) => {
+    const r = (g.results || [])[i] || {};
+    return `${i + 1}. ${q}\nTheir answer: ${((session.answers || [])[i] || "").trim() || "(no answer)"}\nScore: ${r.score}/10. Feedback: ${r.feedback || ""} Model answer: ${r.modelAnswer || ""}`;
+  }).join("\n\n");
+}
+
+// One chat turn. Like grading, the Claude Code call runs from the learn page
+// (`ask`, then again with `reply`), so this never waits on the bridge itself.
+async function lessonChat({ id, text, reply }) {
+  const key = `design:${id}`;
+  const question = String(text || "").trim();
+  if (!question) throw new Error("Type a question first.");
+  const { learnSessions } = await load(["learnSessions"]);
+  const session = learnSessions[key];
+  if (!session || !session.body) throw new Error("Open the lesson first.");
+  const graded = !!session.grade;
+  const prev = session.chatConvo || {};
+  const convo = { sessionId: prev.sessionId || null, messages: prev.messages, sawGrade: !!prev.sawGrade };
+  const fresh = !convo.sessionId && !(convo.messages && convo.messages.length);
+  // A new conversation gets the lesson in its first prompt. A resumed Claude Code
+  // one keeps it as `context` in case the session is gone and has to start over.
+  const background = lessonChatContext(session);
+  convo.context = fresh ? "" : background + (graded ? "\n\n" + gradeContext(session) : "");
+  const parts = [graded ? "[QUIZ GRADED]" : "[QUIZ NOT GRADED YET]"];
+  if (fresh) parts.push(background);
+  if (graded && (fresh || !convo.sawGrade)) parts.push(gradeContext(session));
+  parts.push(`My question: ${question}`);
+  const { ask, text: answer } = await claudeTurn(convo, { system: LESSON_CHAT_SYSTEM, prompt: parts.join("\n\n") }, reply);
+  if (ask) return { ask };
+  if (!answer.trim()) throw new Error("Claude didn't answer. Try again.");
+  // Re-read: grading may have finished while Claude was answering.
+  const latest = (await load(["learnSessions"])).learnSessions[key] || {};
+  const chat = (latest.chat || []).concat([{ role: "user", text: question }, { role: "assistant", text: answer.trim() }]).slice(-40);
+  await updateLearnSession(key, { chat, chatConvo: { sessionId: convo.sessionId || null, messages: convo.messages, sawGrade: convo.sawGrade || graded } });
+  return { chat };
 }
 
 async function gradeBehavioral({ id, answer, reply }) {
@@ -864,6 +920,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     getLearn: () => getLearn({ type: msg.kind, id: msg.id, next: msg.next }),
     generateLesson: () => generateLesson(msg),
     gradeLesson: () => gradeLesson(msg),
+    lessonChat: () => lessonChat(msg),
     gradeBehavioral: () => gradeBehavioral(msg),
     getStats: () => getStats()
   };
