@@ -24,7 +24,7 @@ const STORAGE_DEFAULTS = {
   behavioralLog: {},  // { questionId: [{ ts, score }] } graded behavioral answers
   learnSessions: {},  // "design:<id>" / "behavioral:<id>" -> lesson text, answers, grade, Claude conversation
   gameGuard: null,    // last report to the game blocker: { at, enabled, done, guard, error }
-  share: { tokens: {}, at: 0, error: "", done: null }, // shared dashboard: a token per "url|name", last push
+  share: { at: 0, error: "", done: null, key: "" }, // shared dashboard: last push
   migrations: {}
 };
 
@@ -316,19 +316,17 @@ async function afterStateChange() {
 async function shareStats(s, p, { force = false } = {}) {
   const url = Share.normalizeUrl(s.settings.shareUrl);
   const name = Share.normalizeName(s.settings.shareName);
-  if (!url || !name) return null;
+  if (!url || !name || !s.settings.sharePassword) return null;
   const share = { ...STORAGE_DEFAULTS.share, ...s.share };
   const key = `${url}|${name.toLowerCase()}`;
   const fresh = Date.now() - (share.at || 0) < Share.SYNC_EVERY_MS;
   if (!force && fresh && share.key === key && share.done === p.done) return null;
   const stats = await getStats();
-  const tokens = { ...(share.tokens || {}) };
   try {
-    const r = await Share.push(fetch, url, Share.summary(stats, p, name), tokens[key]);
-    tokens[key] = r.token;
-    await save({ share: { tokens, at: Date.now(), error: "", done: p.done, key } });
+    await Share.push(fetch, url, Share.summary(stats, p, name), s.settings.sharePassword);
+    await save({ share: { at: Date.now(), error: "", done: p.done, key } });
   } catch (e) {
-    await save({ share: { tokens, at: Date.now(), error: e.message, done: p.done, key } });
+    await save({ share: { at: Date.now(), error: e.message, done: p.done, key } });
     if (force) throw e;
   }
   return (await load(["share"])).share;
@@ -882,9 +880,9 @@ async function getState() {
   const progress = progressFrom(s);
   const strengths = strengthsFrom(s);
   const covered = Core.assessmentCoverage(s.attempts, s.assessment);
-  const { apiKey, ...publicSettings } = s.settings;
+  const { apiKey, sharePassword, ...publicSettings } = s.settings;
   return {
-    settings: { ...publicSettings, hasApiKey: !!apiKey },
+    settings: { ...publicSettings, hasApiKey: !!apiKey, hasSharePassword: !!sharePassword },
     progress,
     picks: s.daily && Core.isCodingType(s.daily.type) ? s.daily.picks.map((p) => ({ ...p, solvedToday: progress.solved.includes(p.slug) })) : [],
     today: s.daily && !Core.isCodingType(s.daily.type)
@@ -911,6 +909,7 @@ async function saveSettings(patch) {
   const s = await load(["settings"]);
   const settings = { ...s.settings, ...patch };
   if (patch.apiKey === undefined) settings.apiKey = s.settings.apiKey;
+  if (!patch.sharePassword) settings.sharePassword = s.settings.sharePassword;
   settings.blockedSites = Core.parseSiteList(settings.blockedSites);
   settings.blockedGames = Core.parseGameList(settings.blockedGames);
   settings.blockGames = !!settings.blockGames;
@@ -926,6 +925,8 @@ async function saveSettings(patch) {
   const rampChanged = patch.rampUp !== undefined && !!patch.rampUp !== !!s.settings.rampUp;
   const goalChanged = settings.dailyGoal !== s.settings.dailyGoal;
   await save({ settings });
+  // New dashboard login details: send right away on the next state change.
+  if (["shareName", "shareUrl", "sharePassword"].some((k) => patch[k] !== undefined && patch[k] !== s.settings[k])) await save({ share: STORAGE_DEFAULTS.share });
   // Turning the warm-up on restarts it from day 1; either way, re-pick today's problems.
   if (rampChanged && settings.rampUp) await save({ rampStartedAt: Date.now() });
   if (rampChanged || goalChanged || scheduleChanged) await save({ daily: null });
@@ -956,7 +957,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     getStats: () => getStats(),
     shareNow: async () => {
       const s = await load();
-      if (!Share.normalizeUrl(s.settings.shareUrl) || !Share.normalizeName(s.settings.shareName)) throw new Error("Enter your first name and the dashboard address, then Save.");
+      if (!Share.normalizeUrl(s.settings.shareUrl) || !Share.normalizeName(s.settings.shareName) || !s.settings.sharePassword) throw new Error("Enter your first name, password and the dashboard address.");
       await shareStats(s, progressFrom(s), { force: true });
       return getState();
     }

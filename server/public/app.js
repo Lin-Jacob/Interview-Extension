@@ -1,9 +1,9 @@
-// Friends dashboard page. "Login" is just a first name kept in this browser;
-// it picks which person is highlighted and shown in detail.
+// Friends dashboard page. Log in with a first name and the password the host
+// made; the session token is kept in this browser.
 "use strict";
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
-const NAME_KEY = "dailyLockName";
+const SESSION_KEY = "dailyLockSession";
 const TASK = { leetcode: "LeetCode", sql: "SQL", design: "System design", behavioral: "Behavioral" };
 const TYPE_COLOR = { leetcode: "var(--s-leetcode)", design: "var(--s-design)", behavioral: "var(--s-behavioral)" };
 
@@ -24,8 +24,15 @@ function svgEl(tag, attrs = {}) {
   return e;
 }
 
-function getName() { try { return localStorage.getItem(NAME_KEY) || ""; } catch { return ""; } }
-function setName(n) { try { n ? localStorage.setItem(NAME_KEY, n) : localStorage.removeItem(NAME_KEY); } catch { /* private window */ } }
+// { token, name } or null. Falls back to memory in a private window.
+let memorySession = null;
+function getSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch { return memorySession; }
+}
+function setSession(sess) {
+  memorySession = sess;
+  try { sess ? localStorage.setItem(SESSION_KEY, JSON.stringify(sess)) : localStorage.removeItem(SESSION_KEY); } catch { /* private window */ }
+}
 const key = (n) => String(n || "").trim().replace(/\s+/g, " ").toLowerCase();
 
 const pct = (x) => (x === null || x === undefined ? "—" : `${Math.round(x * 100)}%`);
@@ -61,7 +68,8 @@ function hover(node, lines) {
 
 // ---------- state ----------
 let users = [];
-let me = getName();
+let session = getSession();
+let me = session ? session.name : "";
 let selected = null;
 
 function todayStatus(u) {
@@ -170,7 +178,7 @@ function render() {
   if (!mine) {
     nj.replaceChildren(
       el("strong", {}, `No stats for "${me}" yet.`),
-      el("p", { class: "muted", style: "margin:6px 0 0" }, "In the extension settings, under Practice with friends, enter this exact first name and this page's address, then click Sync now. New here? Open How to join below."));
+      el("p", { class: "muted", style: "margin:6px 0 0" }, "In the extension settings, under Practice with friends, enter your first name, password and this page's address, then click Sync now. New here? Open How to join below."));
     $("join").open = true;
   }
   if (!selected || !users.some((u) => key(u.name) === key(selected))) selected = mine ? mine.name : (users[0] || {}).name || null;
@@ -178,11 +186,30 @@ function render() {
   renderDetail();
 }
 
+function api(pathname, { method = "GET", body } = {}) {
+  const headers = { "ngrok-skip-browser-warning": "1" };
+  if (session) headers.authorization = `Bearer ${session.token}`;
+  if (body) headers["content-type"] = "application/json";
+  return fetch(pathname, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
+}
+
+function signedOut() {
+  session = null;
+  me = "";
+  users = [];
+  selected = null;
+  setSession(null);
+  render();
+}
+
 async function refresh() {
+  if (!session) return;
   try {
-    const r = await fetch("api/users", { headers: { "ngrok-skip-browser-warning": "1" }, cache: "no-store" });
+    const r = await api("api/users");
+    if (r.status === 401) { signedOut(); return; }
     const data = await r.json();
-    users = data.users || [];
+    users = (data.users || []).filter((u) => !u.empty);
+    if (data.me) me = data.me;
     $("updated").textContent = `Refreshed ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
   } catch (e) {
     $("updated").textContent = `Couldn't load: ${e.message}`;
@@ -190,20 +217,33 @@ async function refresh() {
   render();
 }
 
-$("login").addEventListener("submit", (e) => {
+$("login").addEventListener("submit", async (e) => {
   e.preventDefault();
-  me = $("nameInput").value.trim().replace(/\s+/g, " ");
-  if (!me) return;
-  setName(me);
-  selected = null;
-  render();
+  const err = $("loginError");
+  err.hidden = true;
+  $("loginBtn").disabled = true;
+  try {
+    const r = await api("api/login", { method: "POST", body: { name: $("nameInput").value, password: $("passwordInput").value } });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || "Couldn't log in.");
+    session = { token: data.token, name: data.name };
+    setSession(session);
+    me = data.name;
+    selected = null;
+    $("passwordInput").value = "";
+    render();
+    await refresh();
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+  } finally {
+    $("loginBtn").disabled = false;
+  }
 });
-$("logout").addEventListener("click", () => {
-  me = "";
-  setName("");
-  selected = null;
+$("logout").addEventListener("click", async () => {
+  await api("api/logout", { method: "POST" }).catch(() => {});
+  signedOut();
   $("nameInput").value = "";
-  render();
   $("nameInput").focus();
 });
 $("hereUrl").textContent = location.origin;

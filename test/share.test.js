@@ -10,8 +10,10 @@ global.BEHAVIORAL = require("../lib/curriculum.js").BEHAVIORAL;
 global.TOPICS = require("../lib/topics.js").TOPICS;
 const Core = require("../lib/core.js");
 const Share = require("../lib/share.js");
-const { createServer, cleanStats } = require("../server/server.js");
+const { createServer, cleanStats, createStore } = require("../server/server.js");
 const { loadEnv, cleanDomain } = require("../server/start.js");
+const Users = require("../server/users.js");
+const { launcherScript } = require("../server/autostart.js");
 
 const now = Date.now();
 const stats = Core.computeStats({
@@ -51,42 +53,71 @@ test("cleanStats drops unknown fields and wrong types", () => {
   assert.strictEqual(cleanStats({ name: "  " }), null);
 });
 
-test("first name claims a spot; others can't post under it; the page and API are served", async () => {
+test("logins: host makes passwords, extension posts with one, page needs one to view", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dash-"));
-  const server = createServer({ dataFile: path.join(dir, "users.json") });
+  const dataFile = path.join(dir, "users.json");
+  const server = createServer({ dataFile, failDelayMs: 0 });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${server.address().port}`;
+  const post = (p, body, headers = {}) => fetch(url + p, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   try {
-    const first = await Share.push(fetch, url, Share.summary(stats, progress, "Jacob", now), "");
-    assert.ok(first.token.length > 10);
-    // Same browser again: same token works.
-    const again = await Share.push(fetch, url, Share.summary(stats, progress, "Jacob", now), first.token);
-    assert.strictEqual(again.token, first.token);
-    // A friend typing "jacob" without the token is turned away.
-    await assert.rejects(Share.push(fetch, url, Share.summary(stats, progress, "jacob", now), ""), /already uses the name "Jacob"/);
-    await Share.push(fetch, url, Share.summary(stats, { ...progress, done: false }, "Sam", now), "");
+    // The host adds accounts while the server runs (users.js writes the same file).
+    const store = createStore(dataFile);
+    const quiet = () => {};
+    Users.main(["add", "Jacob", "jacob-pass"], store, quiet);
+    const out = [];
+    Users.main(["add", "Sam"], store, (l) => out.push(l));
+    const samPass = out.find((l) => l.includes("Password:")).split("Password: ")[1];
+    assert.match(samPass, /^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
 
-    const r = await fetch(`${url}/api/users`);
-    const data = await r.json();
-    assert.deepStrictEqual(data.users.map((u) => u.name).sort(), ["Jacob", "Sam"]);
-    assert.ok(!JSON.stringify(data).includes(first.token), "tokens never leave the server");
-    assert.strictEqual(r.headers.get("access-control-allow-origin"), "*");
+    // Extension pushes: right password works, wrong or missing doesn't.
+    const r1 = await Share.push(fetch, url, Share.summary(stats, progress, "jacob", now), "jacob-pass");
+    assert.strictEqual(r1.name, "Jacob", "the account's spelling wins");
+    await assert.rejects(Share.push(fetch, url, Share.summary(stats, progress, "Jacob", now), "guess"), /don't match/);
+    await assert.rejects(Share.push(fetch, url, Share.summary(stats, progress, "Alex", now), "x"), /don't match/);
+
+    // Viewing needs a session.
+    assert.strictEqual((await fetch(`${url}/api/users`)).status, 401);
+    assert.strictEqual((await post("/api/login", { name: "Sam", password: "nope" })).status, 401);
+    const login = await (await post("/api/login", { name: " sam ", password: samPass })).json();
+    assert.ok(login.ok && login.token);
+    assert.strictEqual(login.name, "Sam");
+    const auth = { authorization: `Bearer ${login.token}` };
+    const data = await (await fetch(`${url}/api/users`, { headers: auth })).json();
+    assert.strictEqual(data.me, "Sam");
+    assert.deepStrictEqual(data.users.map((u) => [u.name, !!u.empty]), [["Jacob", false], ["Sam", true]]);
+    const raw = JSON.stringify(data);
+    assert.ok(!raw.includes("hash") && !raw.includes("salt") && !raw.includes(login.token));
+
+    // A new password signs Sam out; logout ends a session.
+    Users.main(["add", "Sam", "new-pass"], store, quiet);
+    assert.strictEqual((await fetch(`${url}/api/users`, { headers: auth })).status, 401);
+    const l2 = await (await post("/api/login", { name: "Sam", password: "new-pass" })).json();
+    assert.ok(l2.ok);
+    await post("/api/logout", {}, { authorization: `Bearer ${l2.token}` });
+    assert.strictEqual((await fetch(`${url}/api/users`, { headers: { authorization: `Bearer ${l2.token}` } })).status, 401);
+
+    // Removing someone deletes their stats too.
+    Users.main(["remove", "Jacob"], store, quiet);
+    await assert.rejects(Share.push(fetch, url, Share.summary(stats, progress, "Jacob", now), "jacob-pass"), /don't match/);
+    assert.ok(!JSON.parse(fs.readFileSync(dataFile, "utf8")).users.jacob);
 
     const pre = await fetch(`${url}/api/sync`, { method: "OPTIONS" });
     assert.strictEqual(pre.status, 204);
     assert.match(pre.headers.get("access-control-allow-headers"), /ngrok-skip-browser-warning/);
-
     const page = await fetch(`${url}/`);
     assert.match(await page.text(), /Daily Lock Friends/);
     assert.strictEqual((await fetch(`${url}/../server.js`)).status, 404);
-    assert.strictEqual((await fetch(`${url}/%2e%2e/server.js`)).status, 404);
-
-    // Saved to disk, so a restart keeps everyone.
-    const saved = JSON.parse(fs.readFileSync(path.join(dir, "users.json"), "utf8"));
-    assert.ok(saved.users.jacob && saved.users.sam);
+    assert.strictEqual((await fetch(`${url}/%2e%2e/data/users.json`)).status, 404);
   } finally {
     server.close();
   }
+});
+
+test("Windows sign-in launcher runs start.js hidden with logging", () => {
+  const vbs = launcherScript("C:\\Program Files\\nodejs\\node.exe", "C:\\dash\\start.js");
+  assert.match(vbs, /sh\.CurrentDirectory = "C:\\dash"/);
+  assert.match(vbs, /sh\.Run """C:\\Program Files\\nodejs\\node\.exe"" ""C:\\dash\\start\.js"" --log", 0, False/);
 });
 
 test("push explains when the address isn't the dashboard", async () => {

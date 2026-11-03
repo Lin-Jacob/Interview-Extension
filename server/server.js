@@ -1,17 +1,19 @@
 // Shared dashboard for LeetCode Daily Lock. Each person's extension posts a
 // stats summary here (lib/share.js), and the page in public/ shows everyone's
-// streaks side by side. No dependencies; start.js adds the ngrok tunnel.
+// streaks side by side. start.js adds the ngrok tunnel.
 //
-// "Login" is by first name only. The first extension to post a name gets a
-// random token for it, and later posts for that name must send the token, so
-// a friend can't overwrite your stats by typing your name. Anyone with the
-// link can view the dashboard.
+// Login is a first name plus a password that the host makes for each friend
+// with users.js (`npm run add-user -- Sam`). Passwords are stored as scrypt
+// hashes. The page and the extension both need them: the page to see
+// anyone's stats, the extension to post your own.
 "use strict";
 const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
+const DATA_FILE = path.join(__dirname, "data", "users.json");
+const SESSION_DAYS = 60;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_BODY = 256 * 1024;
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
@@ -58,40 +60,109 @@ function cleanStats(s) {
   };
 }
 
-function createStore(file) {
-  let data = { users: {} };
-  try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* first run */ }
-  if (!data.users) data.users = {};
+// Accounts, stats and page sessions in one JSON file. It's re-read when it
+// changes on disk, so users.js can add people while the dashboard runs.
+function createStore(file = DATA_FILE) {
+  let data = null;
+  let mtime = -1;
+  function load() {
+    let m = -1;
+    try { m = fs.statSync(file).mtimeMs; } catch { /* first run */ }
+    if (data && m === mtime) return data;
+    try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch { data = {}; }
+    for (const k of ["accounts", "users", "sessions"]) if (!data[k] || typeof data[k] !== "object") data[k] = {};
+    mtime = m;
+    return data;
+  }
+  function write() {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, file);
+    mtime = fs.statSync(file).mtimeMs;
+  }
   return {
-    get: (key) => data.users[key],
-    all: () => Object.values(data.users),
-    put(key, user) {
-      data.users[key] = user;
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      const tmp = `${file}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-      fs.renameSync(tmp, file);
-    }
+    data: load,
+    update(fn) { load(); const r = fn(data); write(); return r; }
   };
 }
 
-function sameToken(a, b) {
-  const x = Buffer.from(String(a || "")), y = Buffer.from(String(b || ""));
-  return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y);
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  return { salt, hash: crypto.scryptSync(String(password), salt, 32).toString("hex") };
 }
 
-// Saves one summary. Returns [status, body].
+function checkPassword(account, password) {
+  if (!account || typeof password !== "string" || !password) return false;
+  const { hash } = hashPassword(password, account.salt);
+  const x = Buffer.from(hash, "hex"), y = Buffer.from(account.hash, "hex");
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function setPassword(store, name, password) {
+  const clean = String(name || "").trim().replace(/\s+/g, " ").slice(0, 30);
+  if (!clean) throw new Error("A name is needed.");
+  if (String(password || "").length < 4) throw new Error("Use a password of at least 4 characters.");
+  return store.update((d) => {
+    const key = nameKey(clean);
+    const existed = !!d.accounts[key];
+    d.accounts[key] = { name: clean, ...hashPassword(password), createdAt: existed ? d.accounts[key].createdAt : Date.now() };
+    // A new password signs that person out of the dashboard everywhere.
+    for (const [t, sess] of Object.entries(d.sessions)) if (sess.key === key) delete d.sessions[t];
+    return { name: clean, existed };
+  });
+}
+
+function removeUser(store, name) {
+  const key = nameKey(name);
+  return store.update((d) => {
+    const had = !!(d.accounts[key] || d.users[key]);
+    delete d.accounts[key];
+    delete d.users[key];
+    for (const [t, sess] of Object.entries(d.sessions)) if (sess.key === key) delete d.sessions[t];
+    return had;
+  });
+}
+
+function login(store, name, password) {
+  const key = nameKey(name);
+  const account = store.data().accounts[key];
+  if (!checkPassword(account, password)) return null;
+  const token = crypto.randomBytes(24).toString("base64url");
+  store.update((d) => {
+    const cutoff = Date.now() - SESSION_DAYS * 864e5;
+    for (const [t, sess] of Object.entries(d.sessions)) if (sess.at < cutoff) delete d.sessions[t];
+    d.sessions[token] = { key, at: Date.now() };
+  });
+  return { token, name: account.name };
+}
+
+function sessionFor(store, req) {
+  const m = /^Bearer (\S+)$/.exec(req.headers.authorization || "");
+  if (!m) return null;
+  const d = store.data();
+  const sess = Object.prototype.hasOwnProperty.call(d.sessions, m[1]) ? d.sessions[m[1]] : null;
+  if (!sess || sess.at < Date.now() - SESSION_DAYS * 864e5 || !d.accounts[sess.key]) return null;
+  return { token: m[1], key: sess.key, name: d.accounts[sess.key].name };
+}
+
+const WRONG = "That name and password don't match an account on this dashboard. Ask whoever runs it for yours.";
+
+// Saves one summary from an extension. Returns [status, body].
 function handleSync(store, body) {
   const stats = cleanStats(body && body.stats);
   if (!stats) return [400, { ok: false, error: "Enter your first name in the extension settings." }];
   const key = nameKey(stats.name);
-  const existing = store.get(key);
-  if (existing && !sameToken(existing.token, body.token)) {
-    return [403, { ok: false, error: `Someone already uses the name "${existing.stats.name}" on this dashboard. Add a last initial (like "${stats.name} L.") and save again.` }];
-  }
-  const token = existing ? existing.token : crypto.randomBytes(18).toString("base64url");
-  store.put(key, { token, createdAt: existing ? existing.createdAt : Date.now(), stats });
-  return [200, { ok: true, token }];
+  const account = store.data().accounts[key];
+  if (!checkPassword(account, body.password)) return [401, { ok: false, error: WRONG }];
+  stats.name = account.name;
+  store.update((d) => { d.users[key] = { stats, at: Date.now() }; });
+  return [200, { ok: true, name: account.name }];
+}
+
+function listUsers(store) {
+  const d = store.data();
+  return Object.entries(d.accounts).map(([key, a]) => (d.users[key] ? d.users[key].stats : { name: a.name, empty: true }))
+    .sort((a, b) => !!a.empty - !!b.empty || (b.current || 0) - (a.current || 0) || ((b.totals || {}).last30 || 0) - ((a.totals || {}).last30 || 0) || a.name.localeCompare(b.name));
 }
 
 function send(res, status, body, headers = {}) {
@@ -110,36 +181,57 @@ function send(res, status, body, headers = {}) {
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type, ngrok-skip-browser-warning",
+  "access-control-allow-headers": "content-type, authorization, ngrok-skip-browser-warning",
   "access-control-max-age": "86400"
 };
 
-function createServer({ dataFile = path.join(__dirname, "data", "users.json") } = {}) {
+function readJson(req, res, then) {
+  let size = 0;
+  const chunks = [];
+  req.on("data", (c) => {
+    size += c.length;
+    if (size > MAX_BODY) { send(res, 413, { ok: false, error: "Too much data." }, CORS); req.destroy(); return; }
+    chunks.push(c);
+  });
+  req.on("end", () => {
+    if (res.headersSent) return;
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return send(res, 400, { ok: false, error: "Bad request." }, CORS); }
+    then(body || {});
+  });
+}
+
+// A wrong password waits a second before answering, to slow down guessing.
+const later = (fn, ms) => setTimeout(fn, ms);
+
+function createServer({ dataFile = DATA_FILE, failDelayMs = 1000 } = {}) {
   const store = createStore(dataFile);
   return http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (url.pathname.startsWith("/api/")) {
       if (req.method === "OPTIONS") return send(res, 204, "", CORS);
-      if (url.pathname === "/api/users" && req.method === "GET") {
-        const users = store.all().map((u) => u.stats).sort((a, b) => b.current - a.current || b.totals.last30 - a.totals.last30 || a.name.localeCompare(b.name));
-        return send(res, 200, { ok: true, users, now: Date.now() }, { ...CORS, "cache-control": "no-store" });
-      }
-      if (url.pathname === "/api/sync" && req.method === "POST") {
-        let size = 0;
-        const chunks = [];
-        req.on("data", (c) => {
-          size += c.length;
-          if (size > MAX_BODY) { send(res, 413, { ok: false, error: "Too much data." }, CORS); req.destroy(); return; }
-          chunks.push(c);
-        });
-        req.on("end", () => {
-          if (res.headersSent) return;
-          let body;
-          try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return send(res, 400, { ok: false, error: "Bad request." }, CORS); }
+      const route = `${req.method} ${url.pathname}`;
+      if (route === "POST /api/sync") {
+        return readJson(req, res, (body) => {
           const [status, out] = handleSync(store, body);
-          send(res, status, out, CORS);
+          later(() => send(res, status, out, CORS), status === 401 ? failDelayMs : 0);
         });
-        return undefined;
+      }
+      if (route === "POST /api/login") {
+        return readJson(req, res, (body) => {
+          const r = login(store, body.name, body.password);
+          if (r) return send(res, 200, { ok: true, ...r }, CORS);
+          later(() => send(res, 401, { ok: false, error: WRONG }, CORS), failDelayMs);
+        });
+      }
+      const sess = sessionFor(store, req);
+      if (!sess) return send(res, 401, { ok: false, error: "Log in first." }, CORS);
+      if (route === "GET /api/users") {
+        return send(res, 200, { ok: true, me: sess.name, users: listUsers(store), now: Date.now() }, { ...CORS, "cache-control": "no-store" });
+      }
+      if (route === "POST /api/logout") {
+        store.update((d) => { delete d.sessions[sess.token]; });
+        return send(res, 200, { ok: true }, CORS);
       }
       return send(res, 404, { ok: false, error: "Not found." }, CORS);
     }
@@ -156,4 +248,4 @@ function createServer({ dataFile = path.join(__dirname, "data", "users.json") } 
   });
 }
 
-module.exports = { createServer, cleanStats, handleSync, createStore, nameKey };
+module.exports = { createServer, cleanStats, handleSync, createStore, setPassword, removeUser, login, nameKey, DATA_FILE };

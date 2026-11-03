@@ -4,9 +4,15 @@
   "description": "Shared dashboard for LeetCode Daily Lock, so friends can see each other's streaks. Put online with ngrok.",
   "scripts": {
     "start": "node start.js",
-    "local": "node start.js --local"
+    "local": "node start.js --local",
+    "add-user": "node users.js add",
+    "remove-user": "node users.js remove",
+    "users": "node users.js list",
+    "autostart": "node autostart.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@ngrok/ngrok": "1.7.0"
   }

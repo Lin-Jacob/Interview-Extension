@@ -603,21 +603,21 @@ test("a game closed by the blocker opens today's task in this Firefox", async ()
   assert.strictEqual(ports.length, 2);
 });
 
-test("practice with friends: stats go to the dashboard with the name's token", async () => {
+test("practice with friends: stats go to the dashboard with your name and password", async () => {
   const posts = [];
   const env = makeEnv({
     acToday: ["two-sum"],
     dashboard: async (url, init, body) => {
       posts.push({ url, body, headers: init.headers });
-      if (body.stats.name === "Taken") return { ok: false, status: 403, json: async () => ({ ok: false, error: "Someone already uses the name" }) };
-      return { ok: true, status: 200, json: async () => ({ ok: true, token: body.token || "tok-1" }) };
+      if (body.password !== "pw") return { ok: false, status: 401, json: async () => ({ ok: false, error: "That name and password don't match" }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, name: body.stats.name }) };
     }
   });
   await env.msg({ type: "getState" });
   assert.strictEqual(posts.length, 0, "nothing is shared until a name and address are set");
   await assert.rejects(env.msg({ type: "shareNow" }), /first name/);
 
-  await env.msg({ type: "saveSettings", settings: { shareName: " Jacob ", shareUrl: "friends.test/" } });
+  await env.msg({ type: "saveSettings", settings: { shareName: " Jacob ", shareUrl: "friends.test/", sharePassword: "pw" } });
   let st = await env.msg({ type: "shareNow" });
   assert.strictEqual(st.settings.shareName, "Jacob");
   assert.strictEqual(st.settings.shareUrl, "https://friends.test");
@@ -628,19 +628,21 @@ test("practice with friends: stats go to the dashboard with the name's token", a
   assert.strictEqual(last.headers["ngrok-skip-browser-warning"], "1");
   assert.strictEqual(last.body.stats.name, "Jacob");
   assert.strictEqual(last.body.stats.totals.solved, 1);
-  assert.strictEqual(env.store.share.tokens["https://friends.test|jacob"], "tok-1");
+  assert.strictEqual(last.body.password, "pw");
+  assert.ok(!("sharePassword" in st.settings) && st.settings.hasSharePassword, "the password never goes back to pages");
 
-  // Later pushes send the saved token, and syncs in between don't spam the server.
+  // Saving other settings keeps the password, and syncs in between don't spam the server.
+  await env.msg({ type: "saveSettings", settings: { dailyGoal: 2, sharePassword: "" } });
   const before = posts.length;
   await env.msg({ type: "refresh" });
   await tick();
   assert.strictEqual(posts.length, before);
   await env.msg({ type: "shareNow" });
-  assert.strictEqual(posts[posts.length - 1].body.token, "tok-1");
+  assert.strictEqual(posts[posts.length - 1].body.password, "pw");
 
-  // A name someone else holds shows the server's message.
-  await env.msg({ type: "saveSettings", settings: { shareName: "Taken" } });
-  await assert.rejects(env.msg({ type: "shareNow" }), /already uses/);
+  // A wrong password shows the server's message.
+  await env.msg({ type: "saveSettings", settings: { sharePassword: "typo" } });
+  await assert.rejects(env.msg({ type: "shareNow" }), /don't match/);
   st = await env.msg({ type: "getState" });
-  assert.match(st.share.error, /already uses/);
+  assert.match(st.share.error, /don't match/);
 });

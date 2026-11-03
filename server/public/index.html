@@ -16,17 +16,19 @@
       </div>
       <div id="who" class="row" hidden>
         <span>Hi, <strong id="whoName"></strong></span>
-        <button type="button" id="logout" class="secondary">Switch</button>
+        <button type="button" id="logout" class="secondary">Log out</button>
       </div>
     </header>
 
     <form id="login" class="card" hidden>
-      <h2>Who are you?</h2>
-      <p class="muted">Type your first name, the same one you entered in the extension settings.</p>
-      <div class="row">
-        <input type="text" id="nameInput" autocomplete="given-name" spellcheck="false" maxlength="30" placeholder="First name" required>
-        <button type="submit">Continue</button>
+      <h2>Log in</h2>
+      <p class="muted">Your username is your first name. The password is the one the dashboard's host gave you.</p>
+      <div class="login-fields">
+        <input type="text" id="nameInput" autocomplete="username" spellcheck="false" maxlength="30" placeholder="First name" required>
+        <input type="password" id="passwordInput" autocomplete="current-password" placeholder="Password" required>
+        <button type="submit" id="loginBtn">Log in</button>
       </div>
+      <p id="loginError" class="error small" hidden></p>
     </form>
 
     <div id="main" hidden>
@@ -52,10 +54,11 @@
     <details class="card" id="join">
       <summary><strong>How to join</strong></summary>
       <ol>
+        <li>Ask whoever runs this dashboard to make you a login. Your username is your first name.</li>
         <li>Use Firefox. Download the newest <code>.xpi</code> file from the <a href="https://github.com/Lin-Jacob/Interview-Extension/releases/latest" target="_blank" rel="noopener">latest release</a> and open it in Firefox to install the extension. It updates itself after that.</li>
         <li>The settings page opens. Click <strong>Allow access</strong>, sign in to leetcode.com in Firefox, and pick which sites to block.</li>
-        <li>Under <strong>Practice with friends</strong>, enter your first name and this page's address: <code id="hereUrl"></code>. Click <strong>Sync now</strong>.</li>
-        <li>Come back here and type the same first name.</li>
+        <li>Under <strong>Practice with friends</strong>, enter your first name, your password and this page's address: <code id="hereUrl"></code>. Click <strong>Sync now</strong>.</li>
+        <li>Log in here with the same name and password.</li>
       </ol>
       <p class="small muted">For hints, lessons and grading, the extension needs Claude: either Claude Code on your own computer (the bridge in the release, on your own Claude plan) or an API key. Everything else works without it.</p>
     </details>

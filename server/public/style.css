@@ -28,12 +28,16 @@ header p { margin: 2px 0 0; }
 .small { font-size: 12px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; min-width: 0; }
-input[type=text] { font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); flex: 1; min-width: 0; max-width: 280px; }
+[hidden] { display: none !important; }
+input[type=text], input[type=password] { font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); flex: 1; min-width: 0; max-width: 280px; }
 button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font: 600 14px system-ui, sans-serif; cursor: pointer; }
 button:hover { background: var(--accent-hover); }
 button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 button.secondary:hover { background: var(--bar); }
 code { background: var(--bar); padding: 1px 5px; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.login-fields { display: flex; gap: 10px; flex-wrap: wrap; }
+.login-fields input { max-width: 220px; }
+.error { color: var(--bad); }
 details summary { cursor: pointer; }
 details ol { padding-left: 20px; }
 details li { margin: 6px 0; }

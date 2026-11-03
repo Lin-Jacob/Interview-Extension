@@ -2,6 +2,7 @@
 // Starts the friends dashboard and puts it online through ngrok.
 //   npm start            dashboard + ngrok tunnel (needs .env)
 //   npm start -- --local dashboard on this computer only
+//   node start.js --log  write output to data/dashboard.log (used by autostart.js)
 // Settings come from .env next to this file (copy .env.example):
 //   NGROK_AUTHTOKEN  from https://dashboard.ngrok.com/get-started/your-authtoken
 //   NGROK_DOMAIN     your free static domain, like something.ngrok-free.app
@@ -30,13 +31,39 @@ function cleanDomain(d) {
   return String(d || "").trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
 }
 
+// Background runs have no window, so output goes to a log file (cut back to
+// the last ~200 KB when it passes 1 MB) and the process id is saved so
+// autostart.js can stop it.
+function logToFile() {
+  const dir = path.join(__dirname, "data");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "dashboard.log");
+  try {
+    if (fs.statSync(file).size > 1024 * 1024) fs.writeFileSync(file, fs.readFileSync(file).subarray(-200 * 1024));
+  } catch { /* new log */ }
+  const write = (...a) => fs.appendFileSync(file, `[${new Date().toLocaleString()}] ${a.join(" ")}\n`);
+  console.log = write;
+  console.error = write;
+  fs.writeFileSync(path.join(dir, "dashboard.pid"), String(process.pid));
+  process.on("uncaughtException", (e) => { write(`Crashed: ${e.stack || e}`); process.exit(1); });
+}
+
 async function main() {
+  if (process.argv.includes("--log")) logToFile();
   const hasEnv = loadEnv(path.join(__dirname, ".env"));
   const local = process.argv.includes("--local");
   const port = Number(process.env.PORT) || 8787;
   const server = createServer();
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  try {
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
+  } catch (e) {
+    console.error(e.code === "EADDRINUSE" ? `Port ${port} is busy. The dashboard is probably already running (maybe in the background from autostart).` : `Couldn't start: ${e.message}`);
+    process.exitCode = 1;
+    return;
+  }
   console.log(`Dashboard running at http://localhost:${port}`);
+  const { accounts } = require("./server.js").createStore().data();
+  if (!Object.keys(accounts).length) console.log("No logins yet. Make one for yourself and each friend: npm run add-user -- <first name>");
   if (local) return;
 
   const token = (process.env.NGROK_AUTHTOKEN || "").trim();
@@ -58,7 +85,7 @@ async function main() {
   try {
     const listener = await ngrok.forward({ addr: port, authtoken: token, domain });
     console.log(`Online at ${listener.url()}`);
-    console.log("Give friends that link. In the extension settings, under Practice with friends, they enter their first name and this address.");
+    console.log("Give friends that link and the password you made them (npm run add-user -- <name>). They enter both in the extension settings under Practice with friends.");
     console.log("Leave this window open; closing it takes the dashboard offline.");
   } catch (e) {
     console.error(`ngrok couldn't start: ${e.message}`);
