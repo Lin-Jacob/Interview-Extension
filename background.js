@@ -221,10 +221,20 @@ async function generateSqlPicks(s, { avoid = [] } = {}) {
   return pick ? [pick] : [];
 }
 
+// Today's design lesson was picked as a review under older rules (e.g. a
+// failed lesson coming back after a week) and isn't due under the current ones.
+// If nothing has been graded today, give today's new pick instead.
+function stalePickedReview(s, type) {
+  if (type !== "design" || !s.daily.review) return false;
+  const start = Core.startOfDay();
+  if (Object.values(s.lessonLog || {}).flat().some((e) => e.ts >= start)) return false;
+  return Core.nextLesson(s.lessonLog).item.id !== s.daily.itemId;
+}
+
 async function ensureDaily() {
   const s = await load();
   const type = Core.taskTypeFor(Date.now(), s.settings.schedule);
-  if (s.daily && s.daily.date === Core.dateKey() && s.daily.type === type) return s.daily;
+  if (s.daily && s.daily.date === Core.dateKey() && s.daily.type === type && !stalePickedReview(s, type)) return s.daily;
   let daily;
   if (type === "leetcode") {
     daily = { date: Core.dateKey(), type, picks: await generatePicks(s) };

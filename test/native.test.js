@@ -152,8 +152,11 @@ test("game rules match program names and install folders", () => {
 
 test("game blocker leaves games that were already open, and closes new launches", { skip: process.platform === "win32" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-game-"));
+  // The fake game is a copy of sh, not of sleep: newer runner images ship a
+  // multi-call coreutils whose sleep exits at once when renamed. "; :" keeps sh
+  // from exec'ing sleep, so the fake game stays the running process.
   const exe = path.join(dir, "fakegame-lcdl");
-  fs.copyFileSync(fs.realpathSync("/bin/sleep"), exe);
+  fs.copyFileSync(fs.realpathSync("/bin/sh"), exe);
   fs.chmodSync(exe, 0o755);
   // A "client" that later starts a game from its own folder, like a League match.
   const client = path.join(dir, "fakeclient-lcdl");
@@ -162,7 +165,8 @@ test("game blocker leaves games that were already open, and closes new launches"
   const sessionPath = path.join(dir, "session.json");
   const { spawn } = require("node:child_process");
   const started = [];
-  const launch = (file) => { const c = spawn(file, ["60"], { stdio: "ignore" }); started.push(c); return c; };
+  const GAME_ARGS = ["-c", "sleep 60; :"];
+  const launch = (file) => { const c = spawn(file, GAME_ARGS, { stdio: "ignore" }); started.push(c); return c; };
   const today = guard.dateKey();
   const blocked = { date: today, done: false, processes: ["fakegame-lcdl", "fakeclient-lcdl"] };
   const shown = [];
@@ -182,7 +186,7 @@ test("game blocker leaves games that were already open, and closes new launches"
     assert.ok(alive(open.pid));
 
     // A kept client starting a game from its own folder is part of that session.
-    const c = spawn(client, ["-c", `sleep 0.4; "${exe}" 60 & wait`], { stdio: "ignore" });
+    const c = spawn(client, ["-c", `sleep 0.4; "${exe}" -c "sleep 60; :" & wait`], { stdio: "ignore" });
     started.push(c);
     await new Promise((r) => setTimeout(r, 100));
     assert.deepStrictEqual(await check({ ...blocked, done: true }), []);

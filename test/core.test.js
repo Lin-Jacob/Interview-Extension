@@ -177,6 +177,24 @@ test("next lesson: first undone, low scores come back for review, then oldest", 
   assert.deepStrictEqual(Core.nextItem(items, all, now), { item: items[1], review: true });
 });
 
+test("failed system design lesson: new lessons for two weeks, then it comes back", () => {
+  const L = require("../lib/curriculum.js").DESIGN_LESSONS;
+  const day = 864e5;
+  const tue = new Date(2026, 10, 3, 21).getTime(); // failed late on a Tuesday evening
+  const log = { [L[0].id]: [{ ts: tue, score: 0.3 }] };
+  const thu = new Date(2026, 10, 5, 9).getTime();
+  assert.deepStrictEqual(Core.nextLesson(log, thu), { item: L[1], review: false }, "moves on to a new lesson");
+  const nextTue = new Date(2026, 10, 10, 9).getTime();
+  assert.strictEqual(Core.nextLesson(log, nextTue).item.id, L[1].id, "not back after one week");
+  // Two weeks later on the same weekday, even earlier in the day than the fail.
+  const twoWeeks = new Date(2026, 10, 17, 8).getTime();
+  assert.deepStrictEqual(Core.nextLesson(log, twoWeeks), { item: L[0], review: true });
+  assert.strictEqual(Core.LESSON_REVIEW_DAYS, 14);
+  // Failing the review again pushes it out another two weeks.
+  const again = { [L[0].id]: [{ ts: tue, score: 0.3 }, { ts: twoWeeks, score: 0.4 }] };
+  assert.strictEqual(Core.nextLesson(again, twoWeeks + 2 * day).item.id, L[1].id);
+});
+
 test("streaks: today not done yet keeps the current streak", () => {
   const now = new Date(2026, 9, 14, 12).getTime();
   const days = { "2026-10-10": "leetcode", "2026-10-11": "design", "2026-10-12": true, "2026-10-13": "leetcode", "2026-10-01": "leetcode", "2026-10-02": true };
