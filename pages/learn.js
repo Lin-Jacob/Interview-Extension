@@ -86,7 +86,7 @@ function renderDesign(st) {
     quiz.append(el("div", { class: "card", style: "background:var(--bg)" },
       el("div", { class: "progress", style: "font-size:22px" }, scoreText(st.grade.score)),
       el("p", {}, st.grade.summary || ""),
-      st.grade.score < 0.6 ? el("p", { class: "muted small" }, "This lesson comes back for review in a week.") : null,
+      st.grade.score < 0.6 ? el("p", { class: "muted small" }, "Next time you get a new lesson. This one comes back for review in two weeks.") : null,
       el("div", { class: "row" },
         el("button", { class: "secondary", onclick: () => load({ next: true }) }, "Another lesson (optional)"))));
   } else {

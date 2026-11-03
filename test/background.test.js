@@ -303,6 +303,22 @@ function learnNative(replies) {
   };
 }
 
+test("system design day: a lesson failed a week ago is swapped for a new one", async () => {
+  const env = makeEnv({ settings: { dailyGoal: 2, schedule: Array(7).fill("design") } });
+  const weekAgo = Date.now() - 7 * 864e5;
+  // Today's task was already picked under the old one-week review rule.
+  env.store.lessonLog = { "how-the-web-works": [{ ts: weekAgo, score: 0.3 }] };
+  env.store.daily = { date: env.ctx.Core.dateKey(), type: "design", itemId: "how-the-web-works", review: true, picks: [] };
+  const st = await env.msg({ type: "getState" });
+  assert.notStrictEqual(st.today.id, "how-the-web-works");
+  assert.strictEqual(env.store.daily.review, false);
+
+  // Once something is graded today, today's pick stays put.
+  env.store.daily = { date: env.ctx.Core.dateKey(), type: "design", itemId: "how-the-web-works", review: true, picks: [] };
+  env.store.lessonLog["how-the-web-works"].push({ ts: Date.now(), score: 0.5 });
+  assert.strictEqual((await env.msg({ type: "getState" })).today.id, "how-the-web-works");
+});
+
 test("system design day: lesson, graded quiz, goal met, stats", async () => {
   const env = makeEnv({
     settings: { dailyGoal: 2, schedule: Array(7).fill("design") },
