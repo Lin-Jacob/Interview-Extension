@@ -1,0 +1,13 @@
+{
+  "name": "leetcode-daily-lock-dashboard",
+  "private": true,
+  "description": "Shared dashboard for LeetCode Daily Lock, so friends can see each other's streaks. Put online with ngrok.",
+  "scripts": {
+    "start": "node start.js",
+    "local": "node start.js --local"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@ngrok/ngrok": "1.7.0"
+  }
+}

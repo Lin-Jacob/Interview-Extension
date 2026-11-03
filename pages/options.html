@@ -51,6 +51,22 @@
       </label>
       <p id="gameStatus" class="small muted"></p>
 
+      <h2 style="margin-top:24px">Practice with friends</h2>
+      <p class="small muted" style="margin-top:0">Share your streak and progress on a dashboard you and your friends can all see. Everyone uses the same dashboard address and their own first name. Leave these blank to keep your stats in this browser only.</p>
+      <label class="field">Your first name
+        <span class="hint">This is your "login" on the dashboard. If a friend already uses the name, add a last initial.</span>
+        <input type="text" id="shareName" autocomplete="given-name" spellcheck="false" maxlength="30">
+      </label>
+      <label class="field">Dashboard address
+        <span class="hint">The link the dashboard host gave you, like <code>something.ngrok-free.app</code>.</span>
+        <input type="text" id="shareUrl" autocomplete="off" spellcheck="false" placeholder="https://something.ngrok-free.app">
+      </label>
+      <div class="row">
+        <button type="button" id="shareNow" class="secondary">Sync now</button>
+        <a id="openDashboard" href="#" target="_blank" hidden>Open the dashboard</a>
+        <span id="shareStatus" class="small muted"></span>
+      </div>
+
       <h2 style="margin-top:24px">Claude help</h2>
       <label class="field">How hints reach Claude
         <select id="helpMode">

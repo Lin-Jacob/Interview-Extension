@@ -1,4 +1,4 @@
-/* global Core, LeetCode, Claude, TOPICS, DESIGN_LESSONS, BEHAVIORAL */
+/* global Core, LeetCode, Claude, Share, TOPICS, DESIGN_LESSONS, BEHAVIORAL */
 // Background event page: syncs solves from LeetCode, blocks sites until the
 // daily goal is met, picks problems from weak topics, and talks to Claude.
 
@@ -24,6 +24,7 @@ const STORAGE_DEFAULTS = {
   behavioralLog: {},  // { questionId: [{ ts, score }] } graded behavioral answers
   learnSessions: {},  // "design:<id>" / "behavioral:<id>" -> lesson text, answers, grade, Claude conversation
   gameGuard: null,    // last report to the game blocker: { at, enabled, done, guard, error }
+  share: { tokens: {}, at: 0, error: "", done: null }, // shared dashboard: a token per "url|name", last push
   migrations: {}
 };
 
@@ -304,6 +305,33 @@ async function afterStateChange() {
   if (p.done && !s.practiceDays[today]) await save({ practiceDays: { ...s.practiceDays, [today]: p.type } });
   if (!p.done) await sweepTabs();
   await reportGames(s.settings, p, s.gameGuard);
+  // Not awaited: a slow or stopped dashboard shouldn't hold up saving or blocking.
+  shareStats(s, p).catch(() => {});
+}
+
+// ---------- shared dashboard (practice with friends) ----------
+
+// Sends this browser's stats summary to the friends dashboard, at most every
+// couple of minutes unless today's task was just finished or `force` is set.
+async function shareStats(s, p, { force = false } = {}) {
+  const url = Share.normalizeUrl(s.settings.shareUrl);
+  const name = Share.normalizeName(s.settings.shareName);
+  if (!url || !name) return null;
+  const share = { ...STORAGE_DEFAULTS.share, ...s.share };
+  const key = `${url}|${name.toLowerCase()}`;
+  const fresh = Date.now() - (share.at || 0) < Share.SYNC_EVERY_MS;
+  if (!force && fresh && share.key === key && share.done === p.done) return null;
+  const stats = await getStats();
+  const tokens = { ...(share.tokens || {}) };
+  try {
+    const r = await Share.push(fetch, url, Share.summary(stats, p, name), tokens[key]);
+    tokens[key] = r.token;
+    await save({ share: { tokens, at: Date.now(), error: "", done: p.done, key } });
+  } catch (e) {
+    await save({ share: { tokens, at: Date.now(), error: e.message, done: p.done, key } });
+    if (force) throw e;
+  }
+  return (await load(["share"])).share;
 }
 
 // A long-lived bridge connection that reports each game the blocker closes, so
@@ -874,6 +902,7 @@ async function getState() {
     lastSync: s.lastSync,
     syncError: s.syncError,
     gameGuard: s.gameGuard,
+    share: { at: s.share.at, error: s.share.error, url: Share.normalizeUrl(s.settings.shareUrl) },
     username: s.resolvedUsername
   };
 }
@@ -890,6 +919,8 @@ async function saveSettings(patch) {
   if (!Array.isArray(settings.schedule) || settings.schedule.length !== 7) settings.schedule = Core.DEFAULT_SETTINGS.schedule;
   settings.schedule = settings.schedule.map((t) => (Core.TASK_TYPES.includes(t) ? t : "leetcode"));
   const scheduleChanged = JSON.stringify(settings.schedule) !== JSON.stringify(s.settings.schedule);
+  settings.shareName = Share.normalizeName(settings.shareName);
+  settings.shareUrl = Share.normalizeUrl(settings.shareUrl);
   settings.hintsBeforeSolution = Math.min(10, Math.max(1, Number(settings.hintsBeforeSolution) || 5));
   const usernameChanged = patch.username !== undefined && patch.username !== s.settings.username;
   const rampChanged = patch.rampUp !== undefined && !!patch.rampUp !== !!s.settings.rampUp;
@@ -922,7 +953,13 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     gradeLesson: () => gradeLesson(msg),
     lessonChat: () => lessonChat(msg),
     gradeBehavioral: () => gradeBehavioral(msg),
-    getStats: () => getStats()
+    getStats: () => getStats(),
+    shareNow: async () => {
+      const s = await load();
+      if (!Share.normalizeUrl(s.settings.shareUrl) || !Share.normalizeName(s.settings.shareName)) throw new Error("Enter your first name and the dashboard address, then Save.");
+      await shareStats(s, progressFrom(s), { force: true });
+      return getState();
+    }
   };
   const h = handlers[msg && msg.type];
   if (!h) return undefined;

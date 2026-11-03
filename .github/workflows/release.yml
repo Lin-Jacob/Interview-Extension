@@ -60,7 +60,7 @@ jobs:
           npx web-ext sign --channel unlisted --source-dir .
           --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
           --artifacts-dir web-ext-artifacts --approval-timeout 1800000
-          --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts
+          --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts server .env .env.example
 
       - name: Publish the release
         if: steps.check.outputs.skip != 'true'
@@ -70,5 +70,6 @@ jobs:
           mv web-ext-artifacts/*.xpi "$xpi"
           node scripts/updates-json.js "$xpi" > updates.json
           (cd native && zip -q ../leetcode-daily-lock-bridge.zip host.js gameguard.js install.js README.txt)
-          gh release create "v$version" "$xpi" updates.json leetcode-daily-lock-bridge.zip \
+          (cd server && zip -qr ../leetcode-daily-lock-dashboard.zip server.js start.js package.json package-lock.json .env.example README.txt public)
+          gh release create "v$version" "$xpi" updates.json leetcode-daily-lock-bridge.zip leetcode-daily-lock-dashboard.zip \
             --title "v$version" --notes "Signed build $version. Firefox installs it automatically; to install by hand, open $xpi in Firefox."
