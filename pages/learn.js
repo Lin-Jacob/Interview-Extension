@@ -72,7 +72,8 @@ function renderDesign(st) {
     box.addEventListener("input", () => saveDraft(i, box.value));
     if (st.grade) box.disabled = true;
     boxes.push(box);
-    const block = el("div", { class: "q" }, el("div", { class: "prompt" }, `${i + 1}. ${q}`), box);
+    const block = el("div", { class: "q" }, el("div", { class: "prompt" }, `${i + 1}. ${q}`), box,
+      el("button", { class: "ask-link", onclick: () => askAbout(i) }, st.grade ? "Ask Claude about this question" : "Stuck? Ask Claude about the idea behind it"));
     const r = st.grade && st.grade.results && st.grade.results[i];
     if (r) {
       block.append(el("div", { class: "result" },
@@ -139,7 +140,102 @@ function quizOpened() { try { return localStorage.getItem(quizKey()) === "1"; } 
 function openQuiz() { try { localStorage.setItem(quizKey(), "1"); } catch { /* ignore */ } }
 function clearDrafts() { try { for (let i = 0; i < 5; i++) localStorage.removeItem(draftKey(i)); } catch { /* ignore */ } }
 
+// ---------- Ask Claude chat (system design lessons) ----------
+// A panel beside the lesson for questions about it. Until the quiz is graded,
+// Claude explains the ideas but won't hand over quiz answers.
+
+let chatOpen = false;
+let chatBusy = "";
+let chatError = "";
+let chatDraft = "";
+let chatPending = "";
+const chatFab = el("button", { class: "chat-fab", onclick: () => toggleChat() }, "Ask Claude");
+const chatPanel = el("div", { class: "chat-panel" });
+document.body.append(chatFab, chatPanel);
+
+function chatAvailable() { return !!(current && current.type === "design" && current.body); }
+
+function toggleChat(open = !chatOpen) {
+  chatOpen = open;
+  renderChat();
+  if (chatOpen) {
+    const input = chatPanel.querySelector("textarea");
+    if (input) input.focus();
+  }
+}
+
+function askAbout(i) {
+  const graded = !!current.grade;
+  chatDraft = graded
+    ? `About question ${i + 1}: why is the model answer right, and what did I miss?`
+    : `I'm stuck on question ${i + 1}. Can you explain the idea it's testing without giving me the answer?`;
+  toggleChat(true);
+}
+
+async function sendChat() {
+  const text = chatDraft.trim();
+  if (!text || chatBusy || !chatAvailable()) return;
+  chatBusy = "Thinking…"; chatError = ""; chatPending = text; chatDraft = "";
+  renderChat();
+  const id = current.item.id;
+  try {
+    const r = await LearnStep.runLearnStep(send, (host, m) => browser.runtime.sendNativeMessage(host, m), { type: "lessonChat", id, text });
+    if (current && current.item.id === id) current.chat = r.chat;
+  } catch (e) {
+    chatError = e.message;
+    if (!chatDraft) chatDraft = text;
+  }
+  chatBusy = ""; chatPending = "";
+  renderChat();
+}
+
+function renderChat() {
+  const show = chatAvailable();
+  chatFab.style.display = show ? "" : "none";
+  chatPanel.classList.toggle("open", show && chatOpen);
+  if (!show) return;
+  const graded = !!current.grade;
+  const blocked = needsClaude(current);
+  const log = el("div", { class: "chat-log" });
+  const chat = current.chat || [];
+  if (!chat.length && !chatPending) {
+    log.append(el("p", { class: "muted small", style: "margin:0" },
+      "Ask anything about today's lesson or system design in general. " +
+      (graded ? "The quiz is graded, so Claude can go through the model answers with you."
+        : "Until the quiz is graded, Claude explains the ideas but won't write your quiz answers.")));
+  }
+  for (const m of chat) {
+    if (m.role === "user") log.append(el("div", { class: "msg user" }, m.text));
+    else log.append(el("div", { class: "msg assistant" }, md(m.text)));
+  }
+  if (chatPending) log.append(el("div", { class: "msg user" }, chatPending));
+  if (chatBusy) log.append(el("div", { class: "loading small" }, chatBusy));
+  if (chatError) log.append(el("div", { class: "error small" }, chatError));
+  if (blocked) log.append(blocked);
+
+  const input = el("textarea", { rows: "2", placeholder: graded ? "Ask about the lesson or your grade" : "Ask about the lesson (e.g. when would I pick X over Y?)" });
+  input.value = chatDraft;
+  input.disabled = !!blocked;
+  input.addEventListener("input", () => { chatDraft = input.value; });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    if (e.key === "Escape") toggleChat(false);
+  });
+  const askBtn = el("button", { disabled: !!chatBusy || !!blocked, onclick: () => sendChat() }, "Ask");
+  chatPanel.replaceChildren(
+    el("div", { class: "chat-head" },
+      el("strong", {}, "Claude tutor"),
+      el("span", { class: "muted small" }, graded ? "Quiz graded" : "No quiz answers until graded"),
+      el("div", { class: "spacer" }),
+      el("button", { class: "close", title: "Close", onclick: () => toggleChat(false) }, "×")),
+    log,
+    el("div", { class: "chat-ask" }, input, askBtn));
+  log.scrollTop = log.scrollHeight;
+  if (chatOpen && document.activeElement === document.body) input.focus();
+}
+
 function render() {
+  renderChat();
   const root = document.getElementById("root");
   if (!current) { root.replaceChildren(el("p", { class: "loading" }, busy || "Loading…")); return; }
   const parts = current.type === "design" ? renderDesign(current) : renderBehavioral(current);

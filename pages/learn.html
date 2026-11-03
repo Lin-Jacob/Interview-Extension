@@ -19,6 +19,25 @@
     .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--bar); color: var(--muted); }
     .loading { color: var(--muted); font-style: italic; }
     .answer-box { min-height: 220px !important; }
+    .ask-link { background: none; color: var(--accent); padding: 0; font-weight: 500; font-size: 12px; margin-top: 4px; }
+    .ask-link:hover { background: none; text-decoration: underline; }
+    .chat-fab { position: fixed; right: 20px; bottom: 20px; z-index: 10; border-radius: 999px; padding: 10px 16px; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+    .chat-panel { position: fixed; right: 20px; bottom: 70px; z-index: 10; width: min(400px, calc(100vw - 32px)); max-height: min(620px, calc(100vh - 100px));
+      display: none; flex-direction: column; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .chat-panel.open { display: flex; }
+    .chat-head { display: flex; align-items: center; gap: 8px; }
+    .chat-head .close { background: none; color: var(--muted); font-size: 20px; padding: 0 4px; line-height: 1; }
+    .chat-head .close:hover { background: none; color: var(--text); }
+    .chat-log { overflow-y: auto; flex: 1; min-height: 80px; display: flex; flex-direction: column; gap: 8px; }
+    .msg { border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+    .msg.user { background: var(--bar); align-self: flex-end; max-width: 85%; white-space: pre-wrap; }
+    .msg.assistant { border: 1px solid var(--border); }
+    .msg.assistant .lesson { font-size: 14px; line-height: 1.55; }
+    .msg.assistant .lesson p:first-child { margin-top: 0; }
+    .msg.assistant .lesson p:last-child { margin-bottom: 0; }
+    .chat-ask { display: flex; gap: 8px; align-items: flex-end; }
+    .chat-ask textarea { min-height: 0; margin: 0; resize: vertical; font-family: system-ui, sans-serif; }
+    @media (max-width: 600px) { .chat-panel { right: 16px; } .chat-fab { right: 16px; } }
   </style>
 </head>
 <body>
