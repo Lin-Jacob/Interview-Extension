@@ -24,6 +24,16 @@ Start with Windows (no window, runs in the background):
    It starts now and every time you sign in. Output goes to data\dashboard.log.
    Turn it off with:     npm run autostart -- --off
 
+Tray icon (Windows): autostart also puts a dot by the clock (it may be under
+the ^ arrow) that shows whether the dashboard is running:
+     green   online at your ngrok link
+     yellow  running on this PC only (ngrok missing, failed or reconnecting;
+             hover or right-click to see why)
+     red     not running
+   Right-click it to open the dashboard, start, stop or restart it, or open the
+   log. It pops up a note when the dashboard stops. Double-click opens it.
+   To show the tray icon without autostart:   npm run tray
+
 In the extension settings, under "Practice with friends", everyone enters their
 first name, their password and https://<NGROK_DOMAIN>, then clicks Sync now.
 They log in to the dashboard page with the same name and password.

@@ -11,9 +11,9 @@ global.TOPICS = require("../lib/topics.js").TOPICS;
 const Core = require("../lib/core.js");
 const Share = require("../lib/share.js");
 const { createServer, cleanStats, createStore } = require("../server/server.js");
-const { loadEnv, cleanDomain } = require("../server/start.js");
+const { loadEnv, cleanDomain, writeStatus } = require("../server/start.js");
 const Users = require("../server/users.js");
-const { launcherScript } = require("../server/autostart.js");
+const { launcherScript, trayLauncherScript } = require("../server/autostart.js");
 
 const now = Date.now();
 const stats = Core.computeStats({
@@ -118,6 +118,33 @@ test("Windows sign-in launcher runs start.js hidden with logging", () => {
   const vbs = launcherScript("C:\\Program Files\\nodejs\\node.exe", "C:\\dash\\start.js");
   assert.match(vbs, /sh\.CurrentDirectory = "C:\\dash"/);
   assert.match(vbs, /sh\.Run """C:\\Program Files\\nodejs\\node\.exe"" ""C:\\dash\\start\.js"" --log", 0, False/);
+});
+
+test("tray launcher runs tray.ps1 hidden and tells it where node is", () => {
+  const vbs = trayLauncherScript("C:\\Program Files\\nodejs\\node.exe", "C:\\dash\\tray.ps1");
+  assert.match(vbs, /sh\.Run "powershell\.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File ""C:\\dash\\tray\.ps1"" -Node ""C:\\Program Files\\nodejs\\node\.exe""", 0, False/);
+});
+
+test("status file for the tray keeps earlier fields and updates the rest", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "status-"));
+  const f = path.join(dir, "data", "status.json");
+  writeStatus({ pid: 42, port: 8787, online: false, url: "", problem: "" }, f);
+  writeStatus({ online: true, url: "https://jacob.ngrok-free.app" }, f);
+  let s = JSON.parse(fs.readFileSync(f, "utf8"));
+  assert.strictEqual(s.pid, 42);
+  assert.strictEqual(s.online, true);
+  assert.strictEqual(s.url, "https://jacob.ngrok-free.app");
+  writeStatus({ online: false, problem: "ngrok lost its connection and is reconnecting." }, f);
+  s = JSON.parse(fs.readFileSync(f, "utf8"));
+  assert.strictEqual(s.online, false);
+  assert.match(s.problem, /reconnecting/);
+  assert.ok(s.updatedAt);
+});
+
+test("tray icon reads the same status fields start.js writes", () => {
+  const ps1 = fs.readFileSync(path.join(__dirname, "..", "server", "tray.ps1"), "utf8");
+  for (const field of ["pid", "port", "online", "url", "problem", "local"]) assert.match(ps1, new RegExp(`\\$s\\.${field}\\b`));
+  assert.doesNotMatch(ps1, /[^\x00-\x7f]/, "Windows PowerShell 5.1 misreads non-ASCII in files without a BOM");
 });
 
 test("push explains when the address isn't the dashboard", async () => {
