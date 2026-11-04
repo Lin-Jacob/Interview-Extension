@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily Lock Friends</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="row">
+      <div class="spacer">
+        <h1>Daily Lock Friends</h1>
+        <p class="muted" id="sub">Interview prep streaks, side by side.</p>
+      </div>
+      <div id="who" class="row" hidden>
+        <span>Hi, <strong id="whoName"></strong></span>
+        <button type="button" id="logout" class="secondary">Log out</button>
+      </div>
+    </header>
+
+    <form id="login" class="card" hidden>
+      <h2>Log in</h2>
+      <p class="muted">Your username is your first name. The password is the one the dashboard's host gave you.</p>
+      <div class="login-fields">
+        <input type="text" id="nameInput" autocomplete="username" spellcheck="false" maxlength="30" placeholder="First name" required>
+        <input type="password" id="passwordInput" autocomplete="current-password" placeholder="Password" required>
+        <button type="submit" id="loginBtn">Log in</button>
+      </div>
+      <p id="loginError" class="error small" hidden></p>
+    </form>
+
+    <div id="main" hidden>
+      <div id="notJoined" class="card notice" hidden></div>
+      <section class="card">
+        <div class="row"><h2 class="spacer">Today</h2><span id="updated" class="small muted"></span></div>
+        <div id="board" class="board"></div>
+      </section>
+      <section class="card" id="detail" hidden>
+        <h2 id="detailTitle"></h2>
+        <div id="tiles" class="tiles"></div>
+        <h3>Last 26 weeks</h3>
+        <div class="scroll"><svg id="calendar" role="img" aria-label="Practice calendar"></svg></div>
+        <div class="legend small muted">
+          <span>Less</span><i style="background:var(--heat-0)"></i><i style="background:var(--heat-1)"></i><i style="background:var(--heat-2)"></i><i style="background:var(--heat-3)"></i><i style="background:var(--heat-4)"></i><span>More</span>
+          <span class="goal-key"><i class="goal"></i> goal met</span>
+        </div>
+        <h3>Recent</h3>
+        <ul id="recent" class="recent"></ul>
+      </section>
+    </div>
+
+    <details class="card" id="join">
+      <summary><strong>How to join</strong></summary>
+      <ol>
+        <li>Ask whoever runs this dashboard to make you a login. Your username is your first name.</li>
+        <li>Use Firefox. Download the newest <code>.xpi</code> file from the <a href="https://github.com/Lin-Jacob/Interview-Extension/releases/latest" target="_blank" rel="noopener">latest release</a> and open it in Firefox to install the extension. It updates itself after that.</li>
+        <li>The settings page opens. Click <strong>Allow access</strong>, sign in to leetcode.com in Firefox, and pick which sites to block.</li>
+        <li>Under <strong>Practice with friends</strong>, enter your first name, your password and this page's address: <code id="hereUrl"></code>. Click <strong>Sync now</strong>.</li>
+        <li>Log in here with the same name and password.</li>
+      </ol>
+      <p class="small muted">For hints, lessons and grading, the extension needs Claude: either Claude Code on your own computer (the bridge in the release, on your own Claude plan) or an API key. Everything else works without it.</p>
+    </details>
+  </div>
+  <div id="tip" class="tip"></div>
+  <script src="app.js"></script>
+</body>
+</html>

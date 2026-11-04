@@ -61,6 +61,25 @@ function fill(st) {
   $("countRevealedSolutions").checked = !!s.countRevealedSolutions;
   $("rampUp").checked = !!s.rampUp;
   $("autocomplete").checked = s.autocomplete !== false;
+  $("shareName").value = s.shareName || "";
+  $("shareUrl").value = s.shareUrl || "";
+  $("sharePassword").value = "";
+  $("sharePassword").placeholder = s.hasSharePassword ? "Saved. Type a new one to replace it." : "";
+  showShareStatus(st);
+}
+
+function showShareStatus(st) {
+  const sh = st.share || {};
+  const status = $("shareStatus");
+  const link = $("openDashboard");
+  link.hidden = !sh.url;
+  if (sh.url) link.href = sh.url;
+  status.className = "small muted";
+  if (!sh.url || !st.settings.shareName || !st.settings.hasSharePassword) { status.textContent = "Not sharing."; return; }
+  if (!sh.at) { status.textContent = "Not synced yet."; return; }
+  if (sh.error) { status.textContent = sh.error; status.className = "small error"; return; }
+  status.textContent = `Synced at ${new Date(sh.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`;
+  status.className = "small done";
 }
 
 $("form").addEventListener("submit", async (e) => {
@@ -77,7 +96,10 @@ $("form").addEventListener("submit", async (e) => {
     hintsBeforeSolution: Number($("hintsBeforeSolution").value),
     countRevealedSolutions: $("countRevealedSolutions").checked,
     rampUp: $("rampUp").checked,
-    autocomplete: $("autocomplete").checked
+    autocomplete: $("autocomplete").checked,
+    shareName: $("shareName").value,
+    shareUrl: $("shareUrl").value,
+    sharePassword: $("sharePassword").value
   };
   const key = $("apiKey").value.trim();
   if (key) settings.apiKey = key;
@@ -119,6 +141,23 @@ $("testBridge").addEventListener("click", async () => {
   }
 });
 $("helpMode").addEventListener("change", showApiFields);
+
+$("shareNow").addEventListener("click", async () => {
+  $("shareStatus").textContent = "Syncing…";
+  $("shareStatus").className = "small muted";
+  try {
+    await send({ type: "saveSettings", settings: { shareName: $("shareName").value, shareUrl: $("shareUrl").value, sharePassword: $("sharePassword").value } });
+    const st = await send({ type: "shareNow" });
+    $("shareName").value = st.settings.shareName;
+    $("shareUrl").value = st.settings.shareUrl;
+    $("sharePassword").value = "";
+    $("sharePassword").placeholder = st.settings.hasSharePassword ? "Saved. Type a new one to replace it." : "";
+    showShareStatus(st);
+  } catch (e) {
+    $("shareStatus").textContent = e.message;
+    $("shareStatus").className = "small error";
+  }
+});
 
 checkPermissions();
 send({ type: "getState" }).then(fill).catch((e) => { $("saved").textContent = e.message; });

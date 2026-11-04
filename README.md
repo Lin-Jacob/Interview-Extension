@@ -53,6 +53,26 @@ minute). The extension opens that tab itself through the bridge, so it lands in 
 `~/.leetcode-daily-lock/gameguard.log`. It isn't tamper-proof: deleting the scheduled task or
 uninstalling the bridge turns it off.
 
+## Practice with friends (shared dashboard)
+`server/` is a small website that shows everyone's streak, today's task status, a practice calendar
+and recent activity side by side. One person hosts it on their computer and ngrok puts it online.
+
+**Host it:** download `leetcode-daily-lock-dashboard.zip` from the latest release (or use `server/` in
+this repo), copy `.env.example` to `.env` and fill in `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` from
+dashboard.ngrok.com, then run `npm install`. Make a login for yourself and each friend: either list
+them in `.env` as `DASHBOARD_USERS=Jacob:pass1,Sam:pass2` (applied each start; that list is everyone),
+or run `npm run add-user -- <first name> [password]` (it makes one up if you leave it out). Then `npm start`.
+To start it in the background every time you sign in to Windows, run `npm run autostart` once
+(`npm run autostart -- --off` undoes it; output goes to `data/dashboard.log`).
+`.env` and `data/` (password hashes and stats) are gitignored.
+
+**Join:** install the extension from the latest release (above). In settings, under
+**Practice with friends**, enter your first name, the password the host made for you, and the dashboard
+address (`https://<NGROK_DOMAIN>`), then click **Sync now**. Log in to the dashboard page with the same
+name and password. The extension sends a short summary (streaks, counts, problem and lesson titles,
+quiz scores) every few minutes; no code, hints or answers. Friends need their own Claude Code bridge or
+an API key for hints and lessons.
+
 Other options in settings: **Open claude.ai** copies the prompt and opens a claude.ai tab for you to paste
 into, and **API key** answers in the panel and is billed per use.
 

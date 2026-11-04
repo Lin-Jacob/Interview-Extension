@@ -2,3 +2,7 @@ node_modules/
 dist/
 web-ext-artifacts/
 *.xpi
+
+# Friends dashboard: secrets and saved stats stay on the host computer
+.env
+data/

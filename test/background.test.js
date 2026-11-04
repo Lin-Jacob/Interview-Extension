@@ -9,7 +9,7 @@ const LearnStep = require("../lib/learnstep.js");
 
 const ALL_LEETCODE = Array(7).fill("leetcode");
 
-function makeEnv({ acToday = [], native = null, settings = { dailyGoal: 2, schedule: ALL_LEETCODE } } = {}) {
+function makeEnv({ acToday = [], native = null, settings = { dailyGoal: 2, schedule: ALL_LEETCODE }, dashboard = null } = {}) {
   const store = settings ? { settings } : {};
   const sessionStore = {};
   const openTabs = {};
@@ -78,11 +78,12 @@ function makeEnv({ acToday = [], native = null, settings = { dailyGoal: 2, sched
       const tag = body.messages[body.messages.length - 1].content.split("\n")[0];
       return { ok: true, status: 200, json: async () => ({ stop_reason: "end_turn", content: [{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text: `reply to ${tag}` }] }) };
     }
+    if (dashboard && url.startsWith("https://friends.test/")) return dashboard(url, init, body);
     throw new Error("unexpected fetch " + url);
   };
   const ctx = vm.createContext({ browser, fetch, console, URL, setTimeout: () => {}, Date, Math, JSON, Promise });
   ctx.globalThis = ctx;
-  for (const f of ["lib/topics.js", "lib/curriculum.js", "lib/core.js", "lib/leetcode.js", "lib/claude.js", "background.js"]) {
+  for (const f of ["lib/topics.js", "lib/curriculum.js", "lib/core.js", "lib/leetcode.js", "lib/claude.js", "lib/share.js", "background.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   }
   const msg = async (m) => {
@@ -600,4 +601,48 @@ test("a game closed by the blocker opens today's task in this Firefox", async ()
   ports[0].l.dis[0]();
   await env.msg({ type: "refresh" });
   assert.strictEqual(ports.length, 2);
+});
+
+test("practice with friends: stats go to the dashboard with your name and password", async () => {
+  const posts = [];
+  const env = makeEnv({
+    acToday: ["two-sum"],
+    dashboard: async (url, init, body) => {
+      posts.push({ url, body, headers: init.headers });
+      if (body.password !== "pw") return { ok: false, status: 401, json: async () => ({ ok: false, error: "That name and password don't match" }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, name: body.stats.name }) };
+    }
+  });
+  await env.msg({ type: "getState" });
+  assert.strictEqual(posts.length, 0, "nothing is shared until a name and address are set");
+  await assert.rejects(env.msg({ type: "shareNow" }), /first name/);
+
+  await env.msg({ type: "saveSettings", settings: { shareName: " Jacob ", shareUrl: "friends.test/", sharePassword: "pw" } });
+  let st = await env.msg({ type: "shareNow" });
+  assert.strictEqual(st.settings.shareName, "Jacob");
+  assert.strictEqual(st.settings.shareUrl, "https://friends.test");
+  assert.strictEqual(st.share.error, "");
+  assert.ok(st.share.at > 0);
+  const last = posts[posts.length - 1];
+  assert.strictEqual(last.url, "https://friends.test/api/sync");
+  assert.strictEqual(last.headers["ngrok-skip-browser-warning"], "1");
+  assert.strictEqual(last.body.stats.name, "Jacob");
+  assert.strictEqual(last.body.stats.totals.solved, 1);
+  assert.strictEqual(last.body.password, "pw");
+  assert.ok(!("sharePassword" in st.settings) && st.settings.hasSharePassword, "the password never goes back to pages");
+
+  // Saving other settings keeps the password, and syncs in between don't spam the server.
+  await env.msg({ type: "saveSettings", settings: { dailyGoal: 2, sharePassword: "" } });
+  const before = posts.length;
+  await env.msg({ type: "refresh" });
+  await tick();
+  assert.strictEqual(posts.length, before);
+  await env.msg({ type: "shareNow" });
+  assert.strictEqual(posts[posts.length - 1].body.password, "pw");
+
+  // A wrong password shows the server's message.
+  await env.msg({ type: "saveSettings", settings: { sharePassword: "typo" } });
+  await assert.rejects(env.msg({ type: "shareNow" }), /don't match/);
+  st = await env.msg({ type: "getState" });
+  assert.match(st.share.error, /don't match/);
 });
