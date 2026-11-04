@@ -49,6 +49,21 @@ function logToFile() {
   process.on("uncaughtException", (e) => { write(`Crashed: ${e.stack || e}`); process.exit(1); });
 }
 
+// data/status.json tells the tray icon (tray.ps1) what's going on: whether
+// the tunnel is up, its link, and the last problem. The tray checks the port
+// itself to see whether the dashboard is running at all.
+const STATUS_FILE = path.join(__dirname, "data", "status.json");
+function writeStatus(fields, file = STATUS_FILE) {
+  let cur = {};
+  try { cur = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* new */ }
+  const next = { ...cur, ...fields, updatedAt: new Date().toISOString() };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(next, null, 2));
+  } catch { /* the tray just shows less */ }
+  return next;
+}
+
 async function main() {
   if (process.argv.includes("--log")) logToFile();
   const hasEnv = loadEnv(path.join(__dirname, ".env"));
@@ -63,6 +78,9 @@ async function main() {
     return;
   }
   console.log(`Dashboard running at http://localhost:${port}`);
+  // Fresh status for this run (drops the link and error from the last one).
+  try { fs.rmSync(STATUS_FILE, { force: true }); } catch { /* fine */ }
+  writeStatus({ pid: process.pid, port, startedAt: new Date().toISOString(), local, online: false, url: "", problem: "" });
   const { createStore, syncAccountsFromEnv } = require("./server.js");
   const store = createStore();
   if (process.env.DASHBOARD_USERS !== undefined && process.env.DASHBOARD_USERS.trim()) {
@@ -82,6 +100,7 @@ async function main() {
   if (!token || !domain) {
     console.error(`${hasEnv ? "" : "No .env file found. "}Put NGROK_AUTHTOKEN and NGROK_DOMAIN in ${path.join(__dirname, ".env")} (copy .env.example), then run npm start again.`);
     console.error("The dashboard is still running on this computer only.");
+    writeStatus({ problem: "NGROK_AUTHTOKEN or NGROK_DOMAIN is missing from .env." });
     return;
   }
   let ngrok;
@@ -91,19 +110,28 @@ async function main() {
     console.error("ngrok isn't installed yet. Run `npm install` in this folder, then `npm start`.");
     process.exitCode = 1;
     server.close();
+    writeStatus({ problem: "ngrok isn't installed. Run npm install in the server folder." });
     return;
   }
   try {
-    const listener = await ngrok.forward({ addr: port, authtoken: token, domain });
+    const url = `https://${domain}`;
+    // ngrok reconnects by itself after a network drop; keep the tray in step.
+    const onStatusChange = (st) => {
+      if (st === "closed") { console.error("ngrok lost its connection; it will keep retrying."); writeStatus({ online: false, problem: "ngrok lost its connection and is reconnecting." }); }
+      if (st === "connected") { console.log("ngrok reconnected."); writeStatus({ online: true, url, problem: "" }); }
+    };
+    const listener = await ngrok.forward({ addr: port, authtoken: token, domain, onStatusChange });
     console.log(`Online at ${listener.url()}`);
+    writeStatus({ online: true, url: listener.url() || url, problem: "" });
     console.log("Give friends that link and the password you made them (npm run add-user -- <name>). They enter both in the extension settings under Practice with friends.");
     console.log("Leave this window open; closing it takes the dashboard offline.");
   } catch (e) {
     console.error(`ngrok couldn't start: ${e.message}`);
     console.error("Check NGROK_AUTHTOKEN and NGROK_DOMAIN in .env. The domain must be one you claimed at https://dashboard.ngrok.com/domains.");
     console.error("The dashboard is still running on this computer only.");
+    writeStatus({ online: false, problem: `ngrok couldn't start: ${e.message}` });
   }
 }
 
 if (require.main === module) main();
-module.exports = { loadEnv, cleanDomain };
+module.exports = { loadEnv, cleanDomain, writeStatus, STATUS_FILE };

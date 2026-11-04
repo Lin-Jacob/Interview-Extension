@@ -8,7 +8,8 @@
     "add-user": "node users.js add",
     "remove-user": "node users.js remove",
     "users": "node users.js list",
-    "autostart": "node autostart.js"
+    "autostart": "node autostart.js",
+    "tray": "node autostart.js --tray"
   },
   "engines": {
     "node": ">=18"
