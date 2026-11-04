@@ -52,6 +52,10 @@ function main(argv, store = createStore(), log = console.log) {
 }
 
 if (require.main === module) {
+  require("./start.js").loadEnv(require("path").join(__dirname, ".env"));
+  if ((process.env.DASHBOARD_USERS || "").trim() && ["add", "remove"].includes(process.argv[2])) {
+    console.log("Note: DASHBOARD_USERS is set in .env, so the next start replaces logins with that list. Edit .env instead.");
+  }
   try { main(process.argv.slice(2)); } catch (e) { console.error(e.message); process.exitCode = 1; }
 }
 module.exports = { main, makePassword };

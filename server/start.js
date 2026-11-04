@@ -6,6 +6,7 @@
 // Settings come from .env next to this file (copy .env.example):
 //   NGROK_AUTHTOKEN  from https://dashboard.ngrok.com/get-started/your-authtoken
 //   NGROK_DOMAIN     your free static domain, like something.ngrok-free.app
+//   DASHBOARD_USERS  optional logins, like Jacob:pass1,Sam:pass2 (see server.js)
 //   PORT             optional, default 8787
 "use strict";
 const fs = require("fs");
@@ -62,8 +63,18 @@ async function main() {
     return;
   }
   console.log(`Dashboard running at http://localhost:${port}`);
-  const { accounts } = require("./server.js").createStore().data();
-  if (!Object.keys(accounts).length) console.log("No logins yet. Make one for yourself and each friend: npm run add-user -- <first name>");
+  const { createStore, syncAccountsFromEnv } = require("./server.js");
+  const store = createStore();
+  if (process.env.DASHBOARD_USERS !== undefined && process.env.DASHBOARD_USERS.trim()) {
+    try {
+      const r = syncAccountsFromEnv(store, process.env.DASHBOARD_USERS);
+      const parts = [["Added", r.added], ["New password for", r.changed], ["Removed", r.removed]].filter(([, n]) => n.length).map(([w, n]) => `${w} ${n.join(", ")}`);
+      console.log(`Logins from .env: ${Object.values(store.data().accounts).map((a) => a.name).join(", ")}.${parts.length ? ` ${parts.join(". ")}.` : ""}`);
+    } catch (e) {
+      console.error(`Couldn't read DASHBOARD_USERS in .env: ${e.message}`);
+    }
+  }
+  if (!Object.keys(store.data().accounts).length) console.log("No logins yet. Add DASHBOARD_USERS=Name:password,Friend:password to .env, or run: npm run add-user -- <first name>");
   if (local) return;
 
   const token = (process.env.NGROK_AUTHTOKEN || "").trim();

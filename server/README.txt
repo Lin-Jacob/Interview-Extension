@@ -7,7 +7,11 @@ person's extension sends its stats here. ngrok puts it online at your domain.
 2. Copy .env.example to .env in this folder and fill in NGROK_AUTHTOKEN and
    NGROK_DOMAIN (from dashboard.ngrok.com). Never share or commit .env.
 3. In this folder run:   npm install
-4. Make a login for yourself and each friend. The username is the first name:
+4. Make a login for yourself and each friend. The username is the first name.
+   Easiest: put them in .env (passwords can't contain commas):
+     DASHBOARD_USERS=Jacob:mypassword,Sam:samspassword
+   That line is the whole list; it's applied each time the dashboard starts.
+   Or leave it empty and use the commands instead:
      npm run add-user -- Jacob mypassword
      npm run add-user -- Sam               (makes up a password and prints it)
    Run it again with the same name to change a password.

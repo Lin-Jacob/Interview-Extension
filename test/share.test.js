@@ -137,3 +137,29 @@ test(".env reader and domain cleanup", () => {
   assert.strictEqual(loadEnv(path.join(dir, "missing")), false);
   assert.strictEqual(cleanDomain("https://jacob.ngrok-free.app/"), "jacob.ngrok-free.app");
 });
+
+test("DASHBOARD_USERS in .env is the list of logins", () => {
+  const { syncAccountsFromEnv, parseUserList, login } = require("../server/server.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "envusers-"));
+  const store = createStore(path.join(dir, "users.json"));
+  assert.deepStrictEqual(parseUserList(" Jacob:a:b:c , Sam L.:pw12 ,"), [{ name: "Jacob", password: "a:b:c" }, { name: "Sam L.", password: "pw12" }]);
+  assert.throws(() => parseUserList("Jacob"), /needs a password/);
+
+  let r = syncAccountsFromEnv(store, "Jacob:pass1,Sam:pass2");
+  assert.deepStrictEqual(r, { added: ["Jacob", "Sam"], changed: [], removed: [] });
+  const sess = login(store, "sam", "pass2");
+  assert.ok(sess);
+
+  // Restart with the same list: nothing changes and nobody is signed out.
+  r = syncAccountsFromEnv(store, "Jacob:pass1,Sam:pass2");
+  assert.deepStrictEqual(r, { added: [], changed: [], removed: [] });
+  assert.ok(store.data().sessions[sess.token]);
+
+  // New password for Sam signs Sam out; dropping Jacob removes his login but keeps his stats.
+  store.update((d) => { d.users.jacob = { stats: { name: "Jacob" }, at: 1 }; });
+  r = syncAccountsFromEnv(store, "Sam:new-pass");
+  assert.deepStrictEqual(r, { added: [], changed: ["Sam"], removed: ["Jacob"] });
+  assert.ok(!store.data().sessions[sess.token]);
+  assert.strictEqual(login(store, "Jacob", "pass1"), null);
+  assert.ok(store.data().users.jacob, "stats come back if the name is added again");
+});

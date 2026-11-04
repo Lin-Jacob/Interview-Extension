@@ -112,6 +112,44 @@ function setPassword(store, name, password) {
   });
 }
 
+// Logins from .env: DASHBOARD_USERS=Jacob:pass1,Sam:pass2. When it's set it
+// is the whole list, applied at startup: new names are added, changed
+// passwords updated (signing that person out), and names that aren't listed
+// can't log in or sync anymore. Their stats stay saved, so adding the name
+// back brings them back.
+function parseUserList(spec) {
+  const out = [];
+  for (const part of String(spec || "").split(",")) {
+    const i = part.indexOf(":");
+    if (i < 0) { if (part.trim()) throw new Error(`DASHBOARD_USERS entry "${part.trim()}" needs a password, like Sam:password.`); continue; }
+    out.push({ name: part.slice(0, i).trim(), password: part.slice(i + 1).trim() });
+  }
+  return out;
+}
+
+function syncAccountsFromEnv(store, spec) {
+  const list = parseUserList(spec);
+  const result = { added: [], changed: [], removed: [] };
+  const keep = new Set();
+  for (const { name, password } of list) {
+    const key = nameKey(name);
+    keep.add(key);
+    const existing = store.data().accounts[key];
+    if (existing && existing.name === name.replace(/\s+/g, " ") && checkPassword(existing, password)) continue;
+    const r = setPassword(store, name, password);
+    (r.existed ? result.changed : result.added).push(r.name);
+  }
+  store.update((d) => {
+    for (const [key, a] of Object.entries(d.accounts)) {
+      if (keep.has(key)) continue;
+      delete d.accounts[key];
+      for (const [t, sess] of Object.entries(d.sessions)) if (sess.key === key) delete d.sessions[t];
+      result.removed.push(a.name);
+    }
+  });
+  return result;
+}
+
 function removeUser(store, name) {
   const key = nameKey(name);
   return store.update((d) => {
@@ -248,4 +286,4 @@ function createServer({ dataFile = DATA_FILE, failDelayMs = 1000 } = {}) {
   });
 }
 
-module.exports = { createServer, cleanStats, handleSync, createStore, setPassword, removeUser, login, nameKey, DATA_FILE };
+module.exports = { createServer, cleanStats, handleSync, createStore, setPassword, removeUser, syncAccountsFromEnv, parseUserList, login, nameKey, DATA_FILE };
