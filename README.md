@@ -69,7 +69,7 @@ and recent activity side by side. One person hosts it on their computer and ngro
 this repo), copy `.env.example` to `.env` and fill in `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` from
 dashboard.ngrok.com, then run `npm install`. Make a login for yourself and each friend: either list
 them in `.env` as `DASHBOARD_USERS=Jacob:pass1,Sam:pass2` (applied each start; that list is everyone),
-or run `npm run add-user -- <first name> [password]` (it makes one up if you leave it out). Then `npm start`.
+or run `npm run add-user -- <first name> [password]` (it makes one up if you leave it out). Then `npm start` runs it in the background and `npm run stop` stops it (both work from the repo root too).
 To start it in the background every time you sign in to Windows, run `npm run autostart` once
 (`npm run autostart -- --off` undoes it; output goes to `data/dashboard.log`).
 `.env` and `data/` (password hashes and stats) are gitignored.

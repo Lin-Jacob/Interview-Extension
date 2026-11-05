@@ -17,7 +17,11 @@ person's extension sends its stats here. ngrok puts it online at your domain.
    Run it again with the same name to change a password.
    npm run users lists everyone; npm run remove-user -- Sam deletes Sam.
 5. Start it:             npm start
-   Leave the window open. Everyone opens https://<NGROK_DOMAIN>.
+   It runs in the background, so you can close the window. Everyone opens
+   https://<NGROK_DOMAIN>. Output goes to datadashboard.log.
+   Stop it:              npm run stop
+   Both also work from the repo root. To watch it in the window instead:
+     npm run foreground
 
 Start with Windows (no window, runs in the background):
      npm run autostart

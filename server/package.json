@@ -3,7 +3,9 @@
   "private": true,
   "description": "Shared dashboard for LeetCode Daily Lock, so friends can see each other's streaks. Put online with ngrok.",
   "scripts": {
-    "start": "node start.js",
+    "start": "node control.js start",
+    "stop": "node control.js stop",
+    "foreground": "node start.js",
     "local": "node start.js --local",
     "add-user": "node users.js add",
     "remove-user": "node users.js remove",

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Starts the friends dashboard and puts it online through ngrok.
-//   npm start            dashboard + ngrok tunnel (needs .env)
-//   npm start -- --local dashboard on this computer only
-//   node start.js --log  write output to data/dashboard.log (used by autostart.js)
+//   npm run foreground   dashboard + ngrok tunnel in this window (needs .env)
+//   npm run local        dashboard on this computer only, in this window
+//   node start.js --log  write output to data/dashboard.log (used by control.js and autostart.js)
+// npm start and npm run stop (control.js) run this in the background.
 // Settings come from .env next to this file (copy .env.example):
 //   NGROK_AUTHTOKEN  from https://dashboard.ngrok.com/get-started/your-authtoken
 //   NGROK_DOMAIN     your free static domain, like something.ngrok-free.app
@@ -124,7 +125,7 @@ async function main() {
     console.log(`Online at ${listener.url()}`);
     writeStatus({ online: true, url: listener.url() || url, problem: "" });
     console.log("Give friends that link and the password you made them (npm run add-user -- <name>). They enter both in the extension settings under Practice with friends.");
-    console.log("Leave this window open; closing it takes the dashboard offline.");
+    if (!process.argv.includes("--log")) console.log("Leave this window open; closing it takes the dashboard offline.");
   } catch (e) {
     console.error(`ngrok couldn't start: ${e.message}`);
     console.error("Check NGROK_AUTHTOKEN and NGROK_DOMAIN in .env. The domain must be one you claimed at https://dashboard.ngrok.com/domains.");

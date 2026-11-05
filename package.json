@@ -3,6 +3,8 @@
   "private": true,
   "description": "Firefox extension that blocks distracting sites until today's interview prep is done.",
   "scripts": {
+    "start": "node server/control.js start",
+    "stop": "node server/control.js stop",
     "test": "node --test test/*.test.js",
     "lint": "web-ext lint --self-hosted --source-dir . --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts server .env .env.example",
     "build": "web-ext build --source-dir . --ignore-files test native README.md dist web-ext-artifacts node_modules package.json package-lock.json .github scripts server .env .env.example --artifacts-dir dist --overwrite-dest"
