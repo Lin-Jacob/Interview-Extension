@@ -48,14 +48,41 @@ console.log(JSON.stringify({ type: "result", subtype: ${JSON.stringify(isError ?
   return p;
 }
 
+// A fake Codex CLI (`codex exec --json -o FILE`) that records each call and
+// answers like the real one: JSONL events on stdout, last message in -o FILE.
+function fakeCodex(dir, { result = "a codex hint", loggedIn = true } = {}) {
+  const p = path.join(dir, "codex");
+  fs.writeFileSync(p, `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("codex-cli 0.166.0"); process.exit(0); }
+if (args[0] === "login") { console.log(${loggedIn} ? "Logged in using ChatGPT" : "Not logged in"); process.exit(${loggedIn} ? 0 : 1); }
+const input = fs.readFileSync(0, "utf8");
+const calls = (() => { try { return JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir, "codex-calls.json"))}, "utf8")); } catch { return []; } })();
+calls.push({ args, input, cwd: process.cwd(), key: process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || null });
+fs.writeFileSync(${JSON.stringify(path.join(dir, "codex-calls.json"))}, JSON.stringify(calls));
+if (!${loggedIn}) { console.log(JSON.stringify({ type: "turn.failed", error: { message: "401 Unauthorized: please run codex login" } })); process.exit(1); }
+const r = args.indexOf("resume");
+if (r >= 0 && args[args.length - 2] === "gone") { console.error("Error: thread/resume: thread/resume failed: no rollout found for thread id gone"); process.exit(1); }
+const id = r >= 0 ? args[args.length - 2] : "thread-123";
+console.log(JSON.stringify({ type: "thread.started", thread_id: id }));
+console.log(JSON.stringify({ type: "turn.started" }));
+console.log(JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: ${JSON.stringify(result)} } }));
+console.log(JSON.stringify({ type: "turn.completed", usage: {} }));
+fs.writeFileSync(args[args.indexOf("-o") + 1], ${JSON.stringify(result)});
+`);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+
 test("argv disables tools and passes system prompt, resume and model", () => {
   assert.deepStrictEqual(host.buildArgs({ system: "S", sessionId: "abc", model: "opus" }),
     ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--system-prompt", "S", "--resume", "abc", "--model", "opus"]);
   assert.deepStrictEqual(host.buildArgs({}), ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config"]);
 });
 
-test("child env drops API keys so Claude Code uses the signed-in plan", () => {
-  const env = host.childEnv({ PATH: "/bin", ANTHROPIC_API_KEY: "k", ANTHROPIC_AUTH_TOKEN: "t", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "x", HOME: "/h" });
+test("child env drops API keys so Claude Code and Codex use the signed-in plan", () => {
+  const env = host.childEnv({ PATH: "/bin", ANTHROPIC_API_KEY: "k", ANTHROPIC_AUTH_TOKEN: "t", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "x", OPENAI_API_KEY: "o", CODEX_API_KEY: "c", HOME: "/h" });
   assert.deepStrictEqual(env, { PATH: "/bin", HOME: "/h" });
 });
 
@@ -87,6 +114,57 @@ test("host speaks native messaging end to end", () => {
 
   out = run({ type: "ping" });
   assert.deepStrictEqual(out, { ok: true, version: "9.9.9 (Claude Code)" });
+});
+
+test("Codex argv: read-only, JSON events, last message to a file, resume by id", () => {
+  assert.deepStrictEqual(host.buildCodexArgs({ outFile: "F" }), ["exec", "-s", "read-only", "--json", "--skip-git-repo-check", "-o", "F", "-"]);
+  assert.deepStrictEqual(host.buildCodexArgs({ outFile: "F", sessionId: "t1", model: "gpt-5" }),
+    ["exec", "-s", "read-only", "resume", "--json", "--skip-git-repo-check", "-o", "F", "-m", "gpt-5", "t1", "-"]);
+  const ev = host.parseCodexEvents('{"type":"thread.started","thread_id":"t9"}\nnoise\n{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}\n');
+  assert.deepStrictEqual(ev, { threadId: "t9", text: "hi", error: "" });
+  assert.match(host.codexPrompt({ system: "SYS", prompt: "Q" }), /<instructions>\nSYS\n<\/instructions>\n\nQ$/);
+});
+
+test("Codex: same prompts in, answers out, conversations resume, other tools' sessions start over", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-codex-"));
+  const config = { claude: { command: fakeClaude(dir), args: [] }, codex: { command: fakeCodex(dir, { result: "Try a hash map." }), args: [] } };
+  const calls = () => JSON.parse(fs.readFileSync(path.join(dir, "codex-calls.json"), "utf8"));
+  const prev = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "should-not-leak";
+  try {
+    let r = await host.handle({ type: "ask", provider: "codex", system: "TUTOR RULES", prompt: "[HINT 1/5]" }, config);
+    assert.deepStrictEqual(r, { text: "Try a hash map.", sessionId: "codex:thread-123" });
+    let c = calls()[0];
+    assert.match(c.input, /<instructions>\nTUTOR RULES\n<\/instructions>\n\n\[HINT 1\/5\]$/);
+    assert.ok(c.args.includes("read-only") && c.args.includes("--json"));
+    assert.strictEqual(c.key, null);
+
+    r = await host.handle({ type: "ask", provider: "codex", system: "TUTOR RULES", prompt: "[QUESTION]\n\nwhy?", sessionId: "codex:thread-123" }, config);
+    assert.strictEqual(r.sessionId, "codex:thread-123");
+    c = calls()[1];
+    assert.strictEqual(c.input, "[QUESTION]\n\nwhy?", "a resumed turn doesn't resend the instructions");
+    assert.deepStrictEqual(c.args.slice(c.args.indexOf("resume"), c.args.indexOf("resume") + 1).concat(c.args.slice(-2)), ["resume", "thread-123", "-"]);
+
+    // Errors that make the extension start a new conversation mention the session.
+    await assert.rejects(host.handle({ type: "ask", provider: "codex", prompt: "p", sessionId: "claude-session" }, config), /session/);
+    await assert.rejects(host.handle({ type: "ask", provider: "claude", prompt: "p", sessionId: "codex:thread-123" }, config), /session/);
+    await assert.rejects(host.handle({ type: "ask", provider: "codex", prompt: "p", sessionId: "codex:gone" }, config), /resume the earlier Codex session/);
+
+    assert.deepStrictEqual(await host.handle({ type: "ping", provider: "codex" }, config), { version: "codex-cli 0.166.0" });
+    // With only Codex installed, it's the default.
+    r = await host.handle({ type: "ask", prompt: "p" }, { codex: config.codex });
+    assert.strictEqual(r.text, "Try a hash map.");
+  } finally {
+    if (prev === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = prev;
+  }
+});
+
+test("Codex sign-in and install problems are explained", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-codex-"));
+  const codex = { command: fakeCodex(dir, { loggedIn: false }), args: [] };
+  await assert.rejects(host.handle({ type: "ask", provider: "codex", prompt: "p" }, { codex }), /Codex isn't signed in.*codex login/);
+  await assert.rejects(host.handle({ type: "ping", provider: "codex" }, { codex }), /Codex isn't signed in/);
+  await assert.rejects(host.handle({ type: "ask", provider: "codex", prompt: "p" }, { claude: { command: "claude", args: [] } }), /couldn't find Codex/);
 });
 
 test("host reports sign-in problems clearly", async () => {
@@ -254,7 +332,7 @@ test("installer sets up the game blocker even without Claude Code", { skip: proc
   const env = { ...process.env, HOME: home, PATH: "/usr/bin:/bin" };
   const r = spawnSync(process.execPath, [path.join(__dirname, "..", "native", "install.js")], { env, encoding: "utf8" });
   assert.strictEqual(r.status, 1);
-  assert.match(r.stderr, /Couldn't find Claude Code.*Installing the game blocker anyway/);
+  assert.match(r.stderr, /Couldn't find Claude Code or Codex[\s\S]*Installing the game blocker anyway/);
   assert.match(r.stdout, /Game blocker is running/);
   const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
   assert.ok(hb && alive(hb.pid));

@@ -44,7 +44,7 @@
         <input type="checkbox" id="blockGames">
         <span style="flex:1">Close games and game launchers until today's task is done</span>
       </label>
-      <p class="small muted" style="margin:4px 0 0 24px">Needs the Claude Code bridge below (run <code>node install.js</code> again after updating it). A game that's already open when blocking starts keeps running until you close it, but new launches get closed. It checks every 10 seconds, starts with Windows, and keeps games closed on days Firefox hasn't reported the task as done.</p>
+      <p class="small muted" style="margin:4px 0 0 24px">Needs the AI bridge below (run <code>node install.js</code> again after updating it). A game that's already open when blocking starts keeps running until you close it, but new launches get closed. It checks every 10 seconds, starts with Windows, and keeps games closed on days Firefox hasn't reported the task as done.</p>
       <label class="field">Games to close
         <span class="hint">One per line. A program name like <code>steam.exe</code>, or a folder like <code>\steamapps\common\</code> to close everything installed there.</span>
         <textarea id="blockedGames" spellcheck="false"></textarea>
@@ -71,18 +71,26 @@
         <span id="shareStatus" class="small muted"></span>
       </div>
 
-      <h2 style="margin-top:24px">Claude help</h2>
-      <label class="field">How hints reach Claude
+      <h2 style="margin-top:24px">AI help</h2>
+      <label class="field">How hints, lessons and grading reach the AI
         <select id="helpMode">
-          <option value="claudecode">Claude Code on this computer: answers in the panel (uses your Pro plan)</option>
+          <option value="claudecode">On this computer: answers in the panel (uses your Claude or ChatGPT plan)</option>
           <option value="claudeai">Open claude.ai and paste the prompt (uses your Pro plan)</option>
           <option value="api">Answer in the panel using an API key (pay per use)</option>
         </select>
       </label>
       <div id="bridgeFields" class="card" style="background:var(--bg)">
-        <strong>One-time setup for Claude Code</strong>
+        <label class="field" style="margin-top:0">AI tool on this computer
+          <span class="hint">Both get exactly the same prompts, problems, lessons and quiz questions.</span>
+          <select id="aiTool">
+            <option value="claude">Claude Code (Claude Pro or Max plan)</option>
+            <option value="codex">ChatGPT through Codex (ChatGPT Plus or Pro plan)</option>
+          </select>
+        </label>
+        <strong>One-time setup</strong>
         <ol class="small" style="margin:8px 0; padding-left:20px">
-          <li>Install Claude Code from <a href="https://claude.com/claude-code" target="_blank">claude.com/claude-code</a>, run <code>claude</code> in a terminal once, and sign in with your Pro account.</li>
+          <li id="setupClaude">Install Claude Code from <a href="https://claude.com/claude-code" target="_blank">claude.com/claude-code</a>, run <code>claude</code> in a terminal once, and sign in with your Claude account.</li>
+          <li id="setupCodex" hidden>Install Codex with <code>npm install -g @openai/codex</code>, then run <code>codex login</code> and sign in with your ChatGPT account.</li>
           <li>Unzip <code>leetcode-daily-lock-bridge.zip</code> and run <code>node install.js</code> inside it (needs Node.js 18 or newer).</li>
           <li>Restart Firefox, then click Test connection.</li>
         </ol>

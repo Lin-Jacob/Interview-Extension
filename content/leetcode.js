@@ -96,6 +96,14 @@
   const fab = el("button", { class: "lcdl-fab", title: "Ask Claude for help", onclick: () => togglePanel() }, "Ask Claude");
   const panel = el("div", { class: "lcdl-panel" });
 
+  // "Claude" or "ChatGPT", whichever AI tool the settings pick.
+  let savedAiName = "Claude";
+  const aiName = () => (session && session.aiName) || savedAiName;
+  function nameFab() {
+    fab.textContent = `Ask ${aiName()}`;
+    fab.title = `Ask ${aiName()} for help`;
+  }
+
   function toast(text) {
     const t = el("div", { class: "lcdl-toast" }, text);
     document.body.append(t);
@@ -115,6 +123,7 @@
     } catch (e) {
       session = { error: e.message, transcript: [] };
     }
+    nameFab();
     renderPanel();
   }
 
@@ -154,7 +163,7 @@
     panel.replaceChildren();
     const need = s.hintsBeforeSolution || 5;
     const header = el("div", { class: "lcdl-header" },
-      el("strong", {}, "Claude tutor"),
+      el("strong", {}, `${aiName()} tutor`),
       el("span", { class: "lcdl-count" }, s.revealed ? "Solution shown" : `Hints ${Math.min(s.hints || 0, need)}/${need}`),
       el("button", { class: "lcdl-close", title: "Close", onclick: () => togglePanel() }, "×"));
     panel.append(header);
@@ -220,4 +229,6 @@
   }
 
   document.body.append(fab, panel);
+  // Name the button after the AI tool in settings before the panel is opened.
+  send({ type: "getSession", slug }).then((s) => { if (s && s.aiName) { savedAiName = s.aiName; nameFab(); } }).catch(() => {});
 })();
