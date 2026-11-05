@@ -1,14 +1,18 @@
-LeetCode Daily Lock - Claude Code bridge
+LeetCode Daily Lock - AI bridge (Claude Code or Codex)
 
-Lets the extension ask Claude Code on this computer for hints, so they use
-your Claude Pro plan and the answer appears in the LeetCode panel. It also
-installs the game blocker, which closes Steam, Epic, Riot and any games you
-list in the extension settings until today's task is done.
+Lets the extension ask Claude Code or OpenAI's Codex on this computer for
+hints, lessons and grading, so they use your Claude or ChatGPT plan and the
+answer appears in the extension. It also installs the game blocker, which
+closes Steam, Epic, Riot and any games you list in the extension settings
+until today's task is done.
 
-1. Install Claude Code (https://claude.com/claude-code), run `claude` once,
-   and sign in with your Pro account.
+1. Install one AI tool and sign in:
+   Claude Code: https://claude.com/claude-code, then run `claude` once.
+   Codex:       npm install -g @openai/codex, then run `codex login`
+                and sign in with your ChatGPT account.
 2. In this folder, run:   node install.js
-3. Restart Firefox, then in the extension settings click "Test connection".
+3. Restart Firefox. In the extension settings pick your AI tool, then click
+   "Test connection".
 
 Remove it with:           node install.js --uninstall
 (This also removes the game blocker.)

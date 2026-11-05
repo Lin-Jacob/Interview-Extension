@@ -1,6 +1,6 @@
 /* global send, el, Markdown, LearnStep */
 // Daily system design lesson + quiz, or a behavioral / communication question.
-// Claude writes the lesson and grades answers through the background page.
+// The AI (Claude or ChatGPT) writes the lesson and grades answers through the background page.
 
 const params = new URLSearchParams(location.search);
 const type = params.get("type") === "behavioral" ? "behavioral" : "design";
@@ -35,10 +35,13 @@ function historyLine(st) {
   return el("div", { class: "muted small" }, `Last time: ${scoreText(last.score)} on ${new Date(last.ts).toLocaleDateString()}`);
 }
 
+// "Claude" or "ChatGPT", whichever AI tool the settings pick.
+function aiName(st) { return (st && st.aiName) || "Claude"; }
+
 function needsClaude(st) {
   if (st.helpMode === "claudecode" || st.helpMode === "api") return null;
-  return el("div", { class: "card error" }, "Lessons and grading need Claude to answer inside the extension. In ",
-    el("a", { href: "options.html" }, "settings"), ", choose \"Claude Code on this computer\" (your Pro plan).");
+  return el("div", { class: "card error" }, "Lessons and grading need an AI to answer inside the extension. In ",
+    el("a", { href: "options.html" }, "settings"), ", choose \"On this computer\" (your Claude or ChatGPT plan).");
 }
 
 function renderDesign(st) {
@@ -46,7 +49,7 @@ function renderDesign(st) {
   if (!st.body) {
     root.push(el("div", { class: "card" },
       el("p", {}, `Today's lesson is about ${st.item.points}.`),
-      el("p", { class: "muted small" }, "Claude writes it fresh for you. It takes up to a minute."),
+      el("p", { class: "muted small" }, `${aiName(st)} writes it fresh for you. It takes up to a minute.`),
       el("button", { disabled: !!busy || !!needsClaude(st), onclick: () => run("generateLesson", { id: st.item.id, review: st.review }, "Writing your lesson…") }, "Start lesson")));
     return root;
   }
@@ -64,7 +67,7 @@ function renderDesign(st) {
     return root;
   }
   const quiz = el("div", { class: "card" }, el("h2", {}, "Quiz"),
-    el("p", { class: "muted small" }, "Answer in your own words, a few sentences each, the way you'd say it in an interview. Claude grades it."));
+    el("p", { class: "muted small" }, `Answer in your own words, a few sentences each, the way you'd say it in an interview. ${aiName(st)} grades it.`));
   const boxes = [];
   st.questions.forEach((q, i) => {
     const box = el("textarea", { rows: "4", placeholder: "Your answer" });
@@ -73,7 +76,7 @@ function renderDesign(st) {
     if (st.grade) box.disabled = true;
     boxes.push(box);
     const block = el("div", { class: "q" }, el("div", { class: "prompt" }, `${i + 1}. ${q}`), box,
-      el("button", { class: "ask-link", onclick: () => askAbout(i) }, st.grade ? "Ask Claude about this question" : "Stuck? Ask Claude about the idea behind it"));
+      el("button", { class: "ask-link", onclick: () => askAbout(i) }, st.grade ? `Ask ${aiName(st)} about this question` : `Stuck? Ask ${aiName(st)} about the idea behind it`));
     const r = st.grade && st.grade.results && st.grade.results[i];
     if (r) {
       block.append(el("div", { class: "result" },
@@ -192,6 +195,7 @@ async function sendChat() {
 function renderChat() {
   const show = chatAvailable();
   chatFab.style.display = show ? "" : "none";
+  chatFab.textContent = `Ask ${aiName(current)}`;
   chatPanel.classList.toggle("open", show && chatOpen);
   if (!show) return;
   const graded = !!current.grade;
@@ -201,8 +205,8 @@ function renderChat() {
   if (!chat.length && !chatPending) {
     log.append(el("p", { class: "muted small", style: "margin:0" },
       "Ask anything about today's lesson or system design in general. " +
-      (graded ? "The quiz is graded, so Claude can go through the model answers with you."
-        : "Until the quiz is graded, Claude explains the ideas but won't write your quiz answers.")));
+      (graded ? `The quiz is graded, so ${aiName(current)} can go through the model answers with you.`
+        : `Until the quiz is graded, ${aiName(current)} explains the ideas but won't write your quiz answers.`)));
   }
   for (const m of chat) {
     if (m.role === "user") log.append(el("div", { class: "msg user" }, m.text));
@@ -224,7 +228,7 @@ function renderChat() {
   const askBtn = el("button", { disabled: !!chatBusy || !!blocked, onclick: () => sendChat() }, "Ask");
   chatPanel.replaceChildren(
     el("div", { class: "chat-head" },
-      el("strong", {}, "Claude tutor"),
+      el("strong", {}, `${aiName(current)} tutor`),
       el("span", { class: "muted small" }, graded ? "Quiz graded" : "No quiz answers until graded"),
       el("div", { class: "spacer" }),
       el("button", { class: "close", title: "Close", onclick: () => toggleChat(false) }, "×")),

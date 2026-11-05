@@ -1,4 +1,4 @@
-/* global Core, LeetCode, Claude, Share, TOPICS, DESIGN_LESSONS, BEHAVIORAL */
+/* global Core, LeetCode, Claude, Prompts, Share, TOPICS, DESIGN_LESSONS, BEHAVIORAL, LESSON_QUIZZES */
 // Background event page: syncs solves from LeetCode, blocks sites until the
 // daily goal is met, picks problems from weak topics, and talks to Claude.
 
@@ -123,7 +123,8 @@ async function sync({ forceProfile = false } = {}) {
         topics: Core.topicsForProblem(sub.titleSlug, q ? q.topicTags.map((t) => t.slug) : [])
       });
     }
-    await save(patch);
+    // (No second save of `patch` here: its `attempts` copy is stale by now and
+    // would undo a hint recorded during these lookups.)
   } catch (e) {
     await save({ syncError: `Couldn't reach LeetCode: ${e.message}`, lastSync: Date.now() });
   }
@@ -437,6 +438,7 @@ function sessionView(slug, s) {
     transcript: c ? c.transcript : [],
     hasApiKey: !!s.settings.apiKey,
     helpMode: s.settings.helpMode,
+    aiName: aiName(s.settings),
     countRevealed: !!s.settings.countRevealedSolutions
   };
 }
@@ -460,7 +462,7 @@ async function help({ slug, kind, text, code, language }) {
   let claudeSessionId = convo.claudeSessionId || null;
   if (s.settings.helpMode === "claudecode") {
     ({ text: answer, sessionId: claudeSessionId } = await askClaudeCode({
-      system: convo.system, turn, sessionId: claudeSessionId, hintsAlreadyUsed: attempt.hints
+      system: convo.system, turn, sessionId: claudeSessionId, hintsAlreadyUsed: attempt.hints, provider: aiTool(s.settings)
     }));
   } else {
     const effort = kind === "solution" ? "high" : "medium";
@@ -498,6 +500,13 @@ async function help({ slug, kind, text, code, language }) {
 
 const NATIVE_HOST = "leetcode_daily_lock_claude";
 
+// Which AI tool the bridge runs: "claude" (Claude Code) or "codex" (OpenAI
+// Codex CLI, signed in with a ChatGPT plan).
+function aiTool(settings) { return settings && settings.aiTool === "codex" ? "codex" : "claude"; }
+// The name shown on buttons and panels.
+function aiName(settings) { return settings && settings.helpMode === "claudecode" && aiTool(settings) === "codex" ? "ChatGPT" : "Claude"; }
+
+// Asks and pings carry `provider` ("claude" or "codex") from the caller.
 async function nativeCall(message) {
   let r;
   try {
@@ -505,28 +514,26 @@ async function nativeCall(message) {
   } catch (e) {
     const m = String(e && e.message || e);
     if (/no such native application|not found|access to the specified native/i.test(m)) {
-      throw new Error("The Claude Code bridge isn't installed yet. Open the extension settings for the one-time setup.");
+      throw new Error("The AI bridge isn't installed yet. Open the extension settings for the one-time setup.");
     }
-    throw new Error(`Couldn't reach the Claude Code bridge: ${m}`);
+    throw new Error(`Couldn't reach the AI bridge: ${m}`);
   }
-  if (!r || !r.ok) throw new Error((r && r.error) || "The Claude Code bridge returned nothing.");
+  if (!r || !r.ok) throw new Error((r && r.error) || "The AI bridge returned nothing.");
   return r;
 }
 
 // Resumes the problem's Claude Code conversation; if it's gone, starts a new one
 // that knows how many hints were already used.
-async function askClaudeCode({ system, turn, sessionId, hintsAlreadyUsed }) {
+async function askClaudeCode({ system, turn, sessionId, hintsAlreadyUsed, provider }) {
   if (sessionId) {
     try {
-      return await nativeCall({ type: "ask", system, prompt: turn.content, sessionId });
+      return await nativeCall({ type: "ask", provider, system, prompt: turn.content, sessionId });
     } catch (e) {
       if (!/conversation|session/i.test(e.message)) throw e;
     }
   }
-  const note = hintsAlreadyUsed
-    ? `(I already had ${hintsAlreadyUsed} hint(s) in an earlier chat, so continue from hint ${hintsAlreadyUsed + 1}.)\n\n`
-    : "";
-  return nativeCall({ type: "ask", system, prompt: note + turn.content });
+  const note = hintsAlreadyUsed ? Prompts.hintsAlreadyUsedNote(hintsAlreadyUsed) + "\n\n" : "";
+  return nativeCall({ type: "ask", provider, system, prompt: note + turn.content });
 }
 
 // claude.ai mode: build the prompt, count the hint, and open or focus the
@@ -647,10 +654,10 @@ async function converse(convo, { system, prompt, effort = "medium" }) {
   if (mode === "claudecode") {
     let r;
     if (convo.sessionId) {
-      try { r = await nativeCall({ type: "ask", system, prompt, sessionId: convo.sessionId }); }
+      try { r = await nativeCall({ type: "ask", provider: aiTool(s.settings), system, prompt, sessionId: convo.sessionId }); }
       catch (e) { if (!/conversation|session/i.test(e.message)) throw e; }
     }
-    if (!r) r = await nativeCall({ type: "ask", system, prompt: (convo.context ? convo.context + "\n\n" : "") + prompt });
+    if (!r) r = await nativeCall({ type: "ask", provider: aiTool(s.settings), system, prompt: (convo.context ? convo.context + "\n\n" : "") + prompt });
     convo.sessionId = r.sessionId;
     return r.text;
   }
@@ -660,7 +667,7 @@ async function converse(convo, { system, prompt, effort = "medium" }) {
     convo.messages = messages.concat([r.assistantMessage]);
     return r.text;
   }
-  throw new Error("Lessons and grading need Claude to answer here. In settings, choose \"Claude Code on this computer\" (your Pro plan) or an API key.");
+  throw new Error("Lessons and grading need an AI to answer here. In settings, choose \"Claude Code or ChatGPT (Codex) on this computer\" (your Pro or Plus plan) or an API key.");
 }
 
 // Pulls a JSON object out of a reply that may have code fences or extra text.
@@ -671,7 +678,7 @@ function parseJsonReply(text) {
   for (let a = t.indexOf("{"); a >= 0 && a < b; a = t.indexOf("{", a + 1)) {
     try { return JSON.parse(t.slice(a, b + 1)); } catch { /* try the next brace */ }
   }
-  throw new Error("Claude's reply wasn't in the expected format. Try again.");
+  throw new Error("The AI's reply wasn't in the expected format. Try again.");
 }
 
 // One Claude turn for a lesson or grade. In Claude Code mode the call can take
@@ -685,14 +692,16 @@ async function claudeTurn(convo, { system, prompt }, reply) {
   }
   const { settings } = await load(["settings"]);
   if (settings.helpMode === "claudecode") {
-    return { ask: { system, prompt, sessionId: convo.sessionId || null, context: convo.context || "" } };
+    return { ask: { system, prompt, sessionId: convo.sessionId || null, context: convo.context || "", provider: aiTool(settings) } };
   }
   return { text: await converse(convo, { system, prompt }) };
 }
 
-const LESSON_SYSTEM = "You are a senior software engineer at a large tech company. You write short, engaging daily lessons for a new-grad engineer preparing for SWE I/II interviews at major tech companies, covering system design and engineering fundamentals. Be accurate, concrete and practical. The reader knows data structures and algorithms but has little production experience.";
+// The prompt wording is in lib/prompts.js, shared by every AI tool.
+const { LESSON_SYSTEM, COACH_SYSTEM, LESSON_CHAT_SYSTEM } = Prompts;
 
-const COACH_SYSTEM = "You are an experienced interviewer at a large tech company coaching a new-grad candidate for SWE I/II behavioral and communication questions. Grade honestly but kindly, and give concrete, actionable feedback.";
+// The fixed quiz for a lesson (lib/quizzes.js), the same whichever AI writes it.
+function lessonQuiz(id) { return (LESSON_QUIZZES[id] || []).slice(); }
 
 function lessonById(id) { return DESIGN_LESSONS.find((l) => l.id === id); }
 function questionById(id) { return BEHAVIORAL.find((q) => q.id === id); }
@@ -736,7 +745,7 @@ async function getLearn({ type, id, next }) {
     body: fresh.body || null, questions: fresh.questions || null,
     answers: fresh.answers || null, grade: fresh.grade || null,
     chat: fresh.chat || [],
-    helpMode: s.settings.helpMode, progress,
+    helpMode: s.settings.helpMode, aiName: aiName(s.settings), progress,
     position: type === "design" ? DESIGN_LESSONS.findIndex((l) => l.id === itemId) + 1 : null,
     total: type === "design" ? DESIGN_LESSONS.length : BEHAVIORAL.length
   };
@@ -745,24 +754,32 @@ async function getLearn({ type, id, next }) {
 async function generateLesson({ id, review, reply }) {
   const lesson = lessonById(id);
   if (!lesson) throw new Error("Unknown lesson.");
+  const questions = lessonQuiz(id);
+  if (!questions.length) throw new Error("This lesson has no quiz yet.");
   const convo = {};
   const { ask, text } = await claudeTurn(convo, {
     system: LESSON_SYSTEM,
-    prompt: [
-      `Write today's lesson: "${lesson.title}". Cover: ${lesson.points}.`,
-      review ? "This is a review: the student scored low on this topic before, so explain the core ideas differently and more simply." : "",
-      "This is a short reading the student studies before a quiz: 350-550 words of Markdown (about a 2-3 minute read). Keep it tight: one or two sentences on why the topic matters, then the core ideas under 2-3 short ## headings (define key terms the first time they appear), one concrete real-world example (a named company or product is fine), a tiny ASCII diagram in a code block only if it really helps, a 2-3 sentence \"In an interview\" section, and a \"Key takeaways\" list of 3 bullets. Skip anything that isn't essential.",
-      "Then write 3 quiz questions answerable from the reading in a few sentences: one checks understanding, one applies the idea to a scenario, one asks about a trade-off.",
-      "Respond with only a JSON object and no code fences: {\"body\": \"<the lesson in Markdown>\", \"questions\": [\"...\", \"...\", \"...\"]}"
-    ].filter(Boolean).join("\n\n")
+    prompt: Prompts.lessonPrompt({ lesson, questions, review })
   }, reply);
   if (ask) return { ask };
-  const data = parseJsonReply(text);
-  if (!data.body || !Array.isArray(data.questions) || !data.questions.length) throw new Error("Claude's lesson was incomplete. Try again.");
-  // If the Claude Code conversation is lost before grading, this context lets a new one grade fairly.
-  convo.context = `You wrote this lesson for the student:\n\n${data.body}\n\nQuiz questions:\n${data.questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`;
-  await updateLearnSession(`design:${id}`, { createdAt: Date.now(), body: data.body, questions: data.questions.slice(0, 5), answers: null, grade: null, convo, chat: null, chatConvo: null });
+  const body = lessonBody(text);
+  if (!body) throw new Error("The AI's lesson was empty. Try again.");
+  // If the conversation is lost before grading, this context lets a new one grade fairly.
+  convo.context = Prompts.lessonContext({ body, questions });
+  await updateLearnSession(`design:${id}`, { createdAt: Date.now(), body, questions, answers: null, grade: null, convo, chat: null, chatConvo: null });
   return getLearn({ type: "design", id });
+}
+
+// The lesson is plain Markdown. Some tools wrap it in a code fence or, out of
+// habit, in a JSON object with a "body" field, so unwrap both.
+function lessonBody(text) {
+  let t = String(text || "").trim();
+  const fenced = t.match(/^```(?:markdown|md|json)?\s*\n([\s\S]*?)\n```$/);
+  if (fenced) t = fenced[1].trim();
+  if (t.startsWith("{")) {
+    try { const d = JSON.parse(t); if (d && typeof d.body === "string") t = d.body.trim(); } catch { /* it's Markdown */ }
+  }
+  return t;
 }
 
 async function gradeLesson({ id, answers, reply }) {
@@ -772,17 +789,12 @@ async function gradeLesson({ id, answers, reply }) {
   const convo = { ...(session.convo || {}) };
   const { ask, text } = await claudeTurn(convo, {
     system: LESSON_SYSTEM,
-    prompt: [
-      "Here are my answers to the quiz:",
-      session.questions.map((q, i) => `${i + 1}. ${q}\nMy answer: ${(answers[i] || "").trim() || "(no answer)"}`).join("\n\n"),
-      "Grade each answer from 0 to 10 for correctness and completeness, like a friendly but honest interviewer. For each, give 1-3 sentences of feedback and a model answer of 2-4 sentences.",
-      "Respond with only a JSON object and no code fences: {\"results\": [{\"score\": 0, \"feedback\": \"...\", \"modelAnswer\": \"...\"}], \"summary\": \"one or two sentences: encouragement and what to review\"}"
-    ].join("\n\n")
- }, reply);
+    prompt: Prompts.gradeLessonPrompt({ questions: session.questions, answers })
+  }, reply);
   if (ask) return { ask };
   const grade = parseJsonReply(text);
   const scores = (grade.results || []).map((r) => Math.max(0, Math.min(10, Number(r.score) || 0)));
-  if (!scores.length) throw new Error("Claude's grade was incomplete. Try again.");
+  if (!scores.length) throw new Error("The AI's grade was incomplete. Try again.");
   grade.score = scores.reduce((a, b) => a + b, 0) / (scores.length * 10);
   await updateLearnSession(`design:${id}`, { answers, grade, convo });
   const { lessonLog } = await load(["lessonLog"]);
@@ -793,26 +805,12 @@ async function gradeLesson({ id, answers, reply }) {
 
 // ---------- Ask Claude beside a system design lesson ----------
 
-const LESSON_CHAT_SYSTEM = [
-  LESSON_SYSTEM,
-  "Right now you are the student's tutor in a chat beside the lesson you wrote for them. Answer their questions about the lesson, system design and related engineering topics directly and briefly (usually under 200 words), in Markdown, with concrete examples. Each student turn starts with a tag that says whether the quiz has been graded.",
-  "[QUIZ NOT GRADED YET]: the student is still working on the quiz, and their own answers are what get graded. Explain any concept from the lesson freely, but if they ask you to answer a quiz question, write their answer, or check whether a draft answer is right, don't give the answer. Instead point them to the part of the lesson that covers it, explain the underlying idea in general terms, or ask a guiding question.",
-  "[QUIZ GRADED]: the quiz is done, so discuss anything, including the model answers, what they missed and why."
-].join("\n\n");
-
 function lessonChatContext(session) {
-  return [
-    `You wrote this lesson for the student:\n\n${session.body}`,
-    `Quiz questions:\n${(session.questions || []).map((q, i) => `${i + 1}. ${q}`).join("\n")}`
-  ].join("\n\n");
+  return Prompts.lessonContext({ body: session.body, questions: session.questions || [] });
 }
 
 function gradeContext(session) {
-  const g = session.grade || {};
-  return "The quiz was just graded. Their answers and grades:\n" + (session.questions || []).map((q, i) => {
-    const r = (g.results || [])[i] || {};
-    return `${i + 1}. ${q}\nTheir answer: ${((session.answers || [])[i] || "").trim() || "(no answer)"}\nScore: ${r.score}/10. Feedback: ${r.feedback || ""} Model answer: ${r.modelAnswer || ""}`;
-  }).join("\n\n");
+  return Prompts.gradeContext(session);
 }
 
 // One chat turn. Like grading, the Claude Code call runs from the learn page
@@ -832,13 +830,14 @@ async function lessonChat({ id, text, reply }) {
   // one keeps it as `context` in case the session is gone and has to start over.
   const background = lessonChatContext(session);
   convo.context = fresh ? "" : background + (graded ? "\n\n" + gradeContext(session) : "");
-  const parts = [graded ? "[QUIZ GRADED]" : "[QUIZ NOT GRADED YET]"];
-  if (fresh) parts.push(background);
-  if (graded && (fresh || !convo.sawGrade)) parts.push(gradeContext(session));
-  parts.push(`My question: ${question}`);
-  const { ask, text: answer } = await claudeTurn(convo, { system: LESSON_CHAT_SYSTEM, prompt: parts.join("\n\n") }, reply);
+  const prompt = Prompts.lessonChatTurn({
+    graded, question,
+    background: fresh ? background : "",
+    gradeNote: graded && (fresh || !convo.sawGrade) ? gradeContext(session) : ""
+  });
+  const { ask, text: answer } = await claudeTurn(convo, { system: LESSON_CHAT_SYSTEM, prompt }, reply);
   if (ask) return { ask };
-  if (!answer.trim()) throw new Error("Claude didn't answer. Try again.");
+  if (!answer.trim()) throw new Error("The AI didn't answer. Try again.");
   // Re-read: grading may have finished while Claude was answering.
   const latest = (await load(["learnSessions"])).learnSessions[key] || {};
   const chat = (latest.chat || []).concat([{ role: "user", text: question }, { role: "assistant", text: answer.trim() }]).slice(-40);
@@ -853,15 +852,8 @@ async function gradeBehavioral({ id, answer, reply }) {
   const convo = {};
   const { ask, text } = await claudeTurn(convo, {
     system: COACH_SYSTEM,
-    prompt: [
-      `Interview question: ${q.question}`,
-      `What a strong answer does: ${q.tip}`,
-      `My answer (written the way I would say it):\n${answer}`,
-      "Score my answer from 0 to 10 on: structure (STAR where it fits), specificity, my own actions and ownership, a result or reflection, and clarity and concision for a spoken answer of about 2 minutes.",
-      "List what worked and what to improve (concrete). Then rewrite a stronger version that keeps my facts. Don't invent achievements; use placeholders like [metric] where details are missing.",
-      "Respond with only a JSON object and no code fences: {\"score\": 0, \"strengths\": [\"...\"], \"improvements\": [\"...\"], \"improvedAnswer\": \"...\", \"summary\": \"one or two sentences\"}"
-    ].join("\n\n")
- }, reply);
+    prompt: Prompts.behavioralPrompt({ question: q.question, tip: q.tip, answer })
+  }, reply);
   if (ask) return { ask };
   const grade = parseJsonReply(text);
   grade.score = Math.max(0, Math.min(10, Number(grade.score) || 0)) / 10;
@@ -914,6 +906,7 @@ async function saveSettings(patch) {
   settings.blockedGames = Core.parseGameList(settings.blockedGames);
   settings.blockGames = !!settings.blockGames;
   if (!["claudeai", "claudecode", "api"].includes(settings.helpMode)) settings.helpMode = "claudecode";
+  settings.aiTool = aiTool(settings);
   settings.dailyGoal = Math.min(10, Math.max(1, Number(settings.dailyGoal) || 1));
   if (!Array.isArray(settings.schedule) || settings.schedule.length !== 7) settings.schedule = Core.DEFAULT_SETTINGS.schedule;
   settings.schedule = settings.schedule.map((t) => (Core.TASK_TYPES.includes(t) ? t : "leetcode"));
@@ -945,7 +938,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     getSession: async () => sessionView(msg.slug, await load()),
     help: () => help(msg),
     handoff: () => handoff(msg),
-    pingBridge: () => nativeCall({ type: "ping" }),
+    pingBridge: async () => nativeCall({ type: "ping", provider: msg.provider ? aiTool({ aiTool: msg.provider }) : aiTool((await load(["settings"])).settings) }),
     copy: () => navigator.clipboard.writeText(String(msg.text || "")),
     openOptions: () => browser.runtime.openOptionsPage(),
     progress: async () => progressFrom(await load(PROGRESS_KEYS)),

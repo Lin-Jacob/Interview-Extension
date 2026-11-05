@@ -249,3 +249,23 @@ test("SQL problems: study-plan order, tagged as SQL, skipped once solved", () =>
   assert.strictEqual(SQL_PROBLEMS.length, 50);
   assert.strictEqual(new Set(SQL_PROBLEMS.map((p) => p.slug)).size, 50);
 });
+
+test("every system design lesson has a fixed three-question quiz", () => {
+  const L = require("../lib/curriculum.js").DESIGN_LESSONS;
+  const { LESSON_QUIZZES } = require("../lib/quizzes.js");
+  assert.deepStrictEqual(Object.keys(LESSON_QUIZZES).sort(), L.map((l) => l.id).sort());
+  for (const l of L) {
+    const q = LESSON_QUIZZES[l.id];
+    assert.strictEqual(q.length, 3, l.id);
+    assert.ok(q.every((x) => typeof x === "string" && x.length > 20), l.id);
+  }
+});
+
+test("lesson prompt carries the fixed quiz and asks for Markdown only", () => {
+  const P = require("../lib/prompts.js");
+  const p = P.lessonPrompt({ lesson: { title: "Caching", points: "TTLs" }, questions: ["A?", "B?"], review: true });
+  assert.match(p, /"Caching"/);
+  assert.match(p, /review/);
+  assert.match(p, /1\. A\?\n2\. B\?/);
+  assert.match(p, /only the lesson in Markdown/);
+});

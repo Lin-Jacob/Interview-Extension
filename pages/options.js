@@ -56,6 +56,7 @@ function fill(st) {
   $("apiKey").placeholder = s.hasApiKey ? "Saved. Paste a new key to replace it." : "sk-ant-...";
   $("model").value = s.model;
   $("helpMode").value = s.helpMode || "claudecode";
+  $("aiTool").value = s.aiTool === "codex" ? "codex" : "claude";
   showApiFields();
   $("hintsBeforeSolution").value = s.hintsBeforeSolution;
   $("countRevealedSolutions").checked = !!s.countRevealedSolutions;
@@ -93,6 +94,7 @@ $("form").addEventListener("submit", async (e) => {
     blockedGames: $("blockedGames").value,
     model: $("model").value,
     helpMode: $("helpMode").value,
+    aiTool: $("aiTool").value,
     hintsBeforeSolution: Number($("hintsBeforeSolution").value),
     countRevealedSolutions: $("countRevealedSolutions").checked,
     rampUp: $("rampUp").checked,
@@ -126,13 +128,16 @@ function showGameStatus(on, g) {
 function showApiFields() {
   $("apiFields").hidden = $("helpMode").value !== "api";
   $("bridgeFields").hidden = $("helpMode").value !== "claudecode";
+  const codex = $("aiTool").value === "codex";
+  $("setupClaude").hidden = codex;
+  $("setupCodex").hidden = !codex;
 }
 
 $("testBridge").addEventListener("click", async () => {
   $("bridgeStatus").textContent = "Checking…";
   $("bridgeStatus").className = "small muted";
   try {
-    const r = await send({ type: "pingBridge" });
+    const r = await send({ type: "pingBridge", provider: $("aiTool").value });
     $("bridgeStatus").textContent = `Connected: ${r.version}`;
     $("bridgeStatus").className = "small done";
   } catch (e) {
@@ -141,6 +146,7 @@ $("testBridge").addEventListener("click", async () => {
   }
 });
 $("helpMode").addEventListener("change", showApiFields);
+$("aiTool").addEventListener("change", showApiFields);
 
 $("shareNow").addEventListener("click", async () => {
   $("shareStatus").textContent = "Syncing…";

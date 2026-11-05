@@ -21,20 +21,28 @@ with `updates.json`, which Firefox polls through `update_url`. Signing uses the 
 1. The settings page opens. Click **Allow access** if shown (LeetCode + Claude API).
 2. Sign in to leetcode.com in Firefox (or type your username in settings).
 3. Edit the blocked-site list.
-4. Set up the Claude Code bridge (below) so hints use your Pro plan and answer inside the panel.
+4. Set up the AI bridge (below) so hints use your Claude or ChatGPT plan and answer inside the panel.
 
-## Claude Code bridge (hints on your Pro plan)
-The extension can't use a Pro subscription directly, but Claude Code can. The bridge lets Firefox ask
-Claude Code on your computer for each hint, and the answer shows up in the LeetCode panel.
+## AI bridge (hints on your Claude or ChatGPT plan)
+The extension can't use a subscription directly, but Claude Code and OpenAI's Codex CLI can. The bridge
+lets Firefox ask whichever one you use on your computer for each hint, lesson, grade and tutor reply,
+and the answer shows up in the extension.
 
-1. Install Claude Code (https://claude.com/claude-code), run `claude` in a terminal once, and sign in with your Pro account.
+1. Install one of them and sign in:
+   - **Claude Code** (Claude Pro or Max): install from https://claude.com/claude-code, run `claude` once and sign in.
+   - **Codex** (ChatGPT Plus or Pro): `npm install -g @openai/codex`, then `codex login` and sign in with ChatGPT.
 2. Unzip `leetcode-daily-lock-bridge.zip` anywhere and run `node install.js` inside it (Node.js 18+).
-   It finds Claude Code, registers the bridge with Firefox for your user only, and sends one tiny test message.
-3. Restart Firefox. In the extension settings, keep "Claude Code on this computer" selected and click **Test connection**.
+   It finds Claude Code and/or Codex, registers the bridge with Firefox for your user only, and sends one tiny test message.
+3. Restart Firefox. In the extension settings, keep "On this computer" selected, pick your AI tool, and click **Test connection**.
 
-Hints count against your Pro usage limits like claude.ai does. Each problem keeps its own conversation,
-so later hints build on earlier ones. Claude Code runs with all tools turned off, in its own empty folder
-(`~/.leetcode-daily-lock/workspace`), so it only talks and never touches your files.
+Both tools get exactly the same prompts (all of them live in `lib/prompts.js`), and the practice itself
+comes from the extension, not the AI: the LeetCode problems, the fixed three-question quiz for every
+system design lesson (`lib/quizzes.js`) and the behavioral question bank. So two friends on different
+tools answer the same questions; only the wording of each lesson's reading and feedback differs.
+
+Hints count against your plan's usage limits like the chat app does. Each problem keeps its own conversation,
+so later hints build on earlier ones. Claude Code runs with all tools turned off and Codex in its read-only
+sandbox, both in their own empty folder (`~/.leetcode-daily-lock/workspace`), so they only talk and never touch your files.
 To remove it: `node install.js --uninstall`.
 
 ## Game blocker (Windows)
@@ -70,7 +78,7 @@ To start it in the background every time you sign in to Windows, run `npm run au
 **Practice with friends**, enter your first name, the password the host made for you, and the dashboard
 address (`https://<NGROK_DOMAIN>`), then click **Sync now**. Log in to the dashboard page with the same
 name and password. The extension sends a short summary (streaks, counts, problem and lesson titles,
-quiz scores) every few minutes; no code, hints or answers. Friends need their own Claude Code bridge or
+quiz scores) every few minutes; no code, hints or answers. Friends need their own AI bridge (Claude Code or Codex) or
 an API key for hints and lessons.
 
 Other options in settings: **Open claude.ai** copies the prompt and opens a claude.ai tab for you to paste
@@ -92,7 +100,7 @@ into, and **API key** answers in the panel and is billed per use.
   a stronger version that keeps your facts. Low scores come back after 5 days.
 - **Stats:** current and longest streak, goal days in the last 30, a 26-week practice calendar, activity
   per week, LeetCode by difficulty and topic, hint-free rate, quiz averages and a full history.
-- Lessons and grading need Claude Code (or an API key); the claude.ai copy mode can't send answers back.
+- Lessons and grading need the bridge (Claude Code or Codex) or an API key; the claude.ai copy mode can't send answers back.
 - **Progress:** solves come from LeetCode's recent accepted submissions (synced every 5 minutes) plus
   instant detection when you submit and get "Accepted". The toolbar badge shows `done/goal` or ✓.
 - **Blocking:** until the goal is met, any page on a blocked domain (and its subdomains) is replaced

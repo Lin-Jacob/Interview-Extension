@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // Native messaging host for LeetCode Daily Lock. Firefox starts it for each
 // hint, sends one length-prefixed JSON message on stdin, and reads one reply on
-// stdout. It answers by running Claude Code (`claude -p`), which uses whatever
-// account Claude Code is signed in with, such as a Pro plan. It also passes
+// stdout. It answers by running Claude Code (`claude -p`) or OpenAI's Codex CLI
+// (`codex exec`), whichever the extension's settings pick, so answers use the
+// plan that tool is signed in with (Claude Pro, ChatGPT Plus or Pro). The prompts
+// themselves come from the extension (lib/prompts.js) and are the same for
+// both. It also passes
 // today's progress to the game blocker (gameguard.js) and keeps it running.
 "use strict";
 const { spawn, spawnSync } = require("child_process");
@@ -14,6 +17,12 @@ const CONFIG_PATH = path.join(__dirname, "config.json");
 const WORK_DIR = path.join(os.homedir(), ".leetcode-daily-lock", "workspace");
 const TIMEOUT_MS = 5 * 60 * 1000;
 const GUARD_TASK = "LeetCode Daily Lock game blocker";
+
+const DROP_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE", "OPENAI_API_KEY", "CODEX_API_KEY"];
+// Codex session ids are returned as "codex:<id>" so a conversation started with
+// one tool is never resumed with the other.
+const CODEX_PREFIX = "codex:";
+const OTHER_TOOL = "That conversation was with a different AI tool, so the session can't be resumed.";
 
 function loadConfig() {
   try {
@@ -33,15 +42,15 @@ function buildArgs({ system, sessionId, model }) {
   return args;
 }
 
-// Removes variables that would make Claude Code bill an API key or join
-// another Claude Code session instead of using the signed-in plan.
+// Removes variables that would make Claude Code or Codex bill an API key, or
+// join another Claude Code session, instead of using the signed-in plan.
 function childEnv(env = process.env, config = {}) {
   const out = { ...env };
   // Firefox starts us with a bare PATH; restore the one recorded at install time
   // so an npm-installed `claude` (a node script) can find node.
   if (config.path) out.PATH = config.path;
   for (const k of Object.keys(out)) {
-    if (k === "ANTHROPIC_API_KEY" || k === "ANTHROPIC_AUTH_TOKEN" || k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_SESSION")) delete out[k];
+    if (DROP_ENV.includes(k) || k.startsWith("CLAUDE_CODE_SESSION")) delete out[k];
   }
   return out;
 }
@@ -60,12 +69,12 @@ function parseResult(stdout) {
   return data;
 }
 
-function run(command, args, { input = "", cwd, env, timeoutMs = TIMEOUT_MS } = {}) {
+function run(command, args, { input = "", cwd, env, timeoutMs = TIMEOUT_MS, name = "Claude Code" } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env: env || childEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => { child.kill(); reject(new Error("Claude Code took too long to answer.")); }, timeoutMs);
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`${name} took too long to answer.`)); }, timeoutMs);
     child.stdout.on("data", (d) => { stdout += d; });
     child.stderr.on("data", (d) => { stderr += d; });
     child.on("error", (e) => { clearTimeout(timer); reject(e); });
@@ -98,8 +107,104 @@ function reportGames(msg) {
   return { guard: "started" };
 }
 
+// ---- Codex (OpenAI's CLI, signed in with a ChatGPT plan) ----
+
+// Codex has no separate system prompt flag, so a new conversation gets the
+// instructions at the top of its first message, and resumed turns keep them.
+function codexPrompt({ system, prompt }) {
+  if (!system) return prompt || "";
+  return [
+    "Follow the instructions below for this whole conversation. Answer in text only: don't run commands, read files or edit anything.",
+    `<instructions>\n${system}\n</instructions>`,
+    prompt || ""
+  ].join("\n\n");
+}
+
+// argv for `codex exec`. Read-only sandbox and an empty working folder, like
+// Claude Code's tools-off mode; -o writes the final answer to a file.
+function buildCodexArgs({ sessionId, model, outFile }) {
+  const common = ["--json", "--skip-git-repo-check", "-o", outFile];
+  if (model) common.push("-m", model);
+  if (sessionId) return ["exec", "-s", "read-only", "resume", ...common, sessionId, "-"];
+  return ["exec", "-s", "read-only", ...common, "-"];
+}
+
+// Reads `codex exec --json` events: the thread id, the last agent message and
+// any failure.
+function parseCodexEvents(stdout) {
+  const out = { threadId: null, text: "", error: "" };
+  for (const line of String(stdout || "").split("\n")) {
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (!e || typeof e !== "object") continue;
+    if (e.type === "thread.started" && e.thread_id) out.threadId = e.thread_id;
+    if (e.type === "item.completed" && e.item && e.item.type === "agent_message" && typeof e.item.text === "string") out.text = e.item.text;
+    if (e.type === "turn.failed") out.error = String((e.error && e.error.message) || "Codex failed to answer.");
+  }
+  return out;
+}
+
+const CODEX_LOGIN = "Codex isn't signed in. Run `codex login` in a terminal and sign in with your ChatGPT account.";
+const isAuthError = (t) => /not logged in|login|log in|unauthori[sz]ed|401|auth/i.test(t);
+
+async function askCodex(msg, { command, args: baseArgs = [] }, env) {
+  let sessionId = msg.sessionId || null;
+  if (sessionId) {
+    if (!sessionId.startsWith(CODEX_PREFIX)) throw new Error(OTHER_TOOL);
+    sessionId = sessionId.slice(CODEX_PREFIX.length);
+  }
+  const outFile = path.join(os.tmpdir(), `lcdl-codex-${process.pid}-${Date.now()}.txt`);
+  const input = sessionId ? msg.prompt || "" : codexPrompt(msg);
+  let r;
+  try {
+    r = await run(command, baseArgs.concat(buildCodexArgs({ sessionId, model: msg.model, outFile })), { input, cwd: WORK_DIR, env, name: "Codex" });
+  } catch (e) {
+    fs.rmSync(outFile, { force: true });
+    throw e;
+  }
+  let last = "";
+  try { last = fs.readFileSync(outFile, "utf8"); } catch { /* fall back to the events */ }
+  fs.rmSync(outFile, { force: true });
+  const ev = parseCodexEvents(r.stdout);
+  const text = (last.trim() ? last : ev.text).trim();
+  if (r.code !== 0 || ev.error || !text) {
+    const why = (ev.error || r.stderr.split("\n").find((l) => /error/i.test(l)) || r.stderr || `Codex exited with code ${r.code}`).trim().slice(0, 500);
+    if (sessionId && /thread\/resume|no rollout|not found/i.test(r.stderr + ev.error)) throw new Error(`Couldn't resume the earlier Codex session. (${why})`);
+    if (isAuthError(why)) throw new Error(`${CODEX_LOGIN} (${why})`);
+    throw new Error(`Codex error: ${why}`);
+  }
+  const id = ev.threadId || sessionId;
+  return { text, sessionId: id ? CODEX_PREFIX + id : null };
+}
+
+async function handleCodex(msg, config, env) {
+  if (!config.codex) throw new Error("The bridge couldn't find Codex when it was installed. Install it (`npm install -g @openai/codex`), run `codex login` to sign in with ChatGPT, then run `node install.js` again.");
+  const { command, args: baseArgs = [] } = config.codex;
+  if (msg.type === "ping") {
+    const v = await run(command, baseArgs.concat(["--version"]), { cwd: WORK_DIR, env, timeoutMs: 30000, name: "Codex" });
+    if (v.code !== 0) throw new Error((v.stderr || v.stdout || "codex --version failed").trim());
+    const login = await run(command, baseArgs.concat(["login", "status"]), { cwd: WORK_DIR, env, timeoutMs: 30000, name: "Codex" });
+    if (login.code !== 0) throw new Error(CODEX_LOGIN);
+    return { version: v.stdout.trim() };
+  }
+  if (msg.type === "ask") return askCodex(msg, config.codex, env);
+  throw new Error(`Unknown message type: ${msg.type}`);
+}
+
+// The tool to use: what the extension asked for, else whichever was installed.
+function providerFor(msg, config) {
+  if (msg.provider === "codex" || msg.provider === "claude") return msg.provider;
+  if (!config.claude && config.codex) return "codex";
+  return "claude";
+}
+
 async function handle(msg, config = loadConfig()) {
   if (msg.type === "games") return reportGames(msg);
+  if (providerFor(msg, config) === "codex") {
+    fs.mkdirSync(WORK_DIR, { recursive: true });
+    return handleCodex(msg, config, childEnv(process.env, config));
+  }
+  if (msg.sessionId && String(msg.sessionId).startsWith(CODEX_PREFIX)) throw new Error(OTHER_TOOL);
   if (!config.claude) throw new Error("The bridge couldn't find Claude Code when it was installed. Install Claude Code, then run `node install.js` again.");
   const { command, args: baseArgs = [] } = config.claude;
   const env = childEnv(process.env, config);
@@ -188,4 +293,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { buildArgs, childEnv, parseResult, handle, watchGames, GUARD_TASK };
+module.exports = { buildArgs, buildCodexArgs, codexPrompt, parseCodexEvents, childEnv, parseResult, handle, watchGames, GUARD_TASK };

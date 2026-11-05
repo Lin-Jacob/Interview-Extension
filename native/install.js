@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// One-time setup for the LeetCode Daily Lock Claude Code bridge.
+// One-time setup for the LeetCode Daily Lock AI bridge (Claude Code or Codex).
 //   node install.js            install (or update)
 //   node install.js --uninstall
 // Copies host.js and gameguard.js to ~/.leetcode-daily-lock/bridge, records
-// where `claude` is, registers the bridge with Firefox for this user only, and
+// where `claude` and `codex` are (either one is enough), registers the bridge with Firefox for this user only, and
 // sets up the game blocker to run in the background.
 "use strict";
 const { execFileSync, spawn, spawnSync } = require("child_process");
@@ -59,6 +59,36 @@ function findClaude() {
   // Fall back to what an earlier install of the bridge found, if it's still there.
   try {
     const prev = JSON.parse(fs.readFileSync(path.join(INSTALL_DIR, "config.json"), "utf8")).claude;
+    if (prev && prev.command && fs.existsSync(prev.command) && (prev.args || []).every((a) => fs.existsSync(a))) return prev;
+  } catch { /* no earlier install */ }
+  return null;
+}
+
+// Finds OpenAI's Codex CLI the same way. The npm package is a small JavaScript
+// launcher (bin/codex.js) that starts the native binary for this platform.
+function findCodex() {
+  let found = [];
+  try {
+    found = execFileSync(WIN ? "where" : "which", WIN ? ["codex"] : ["-a", "codex"], { encoding: "utf8" })
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch { /* not on PATH */ }
+  const appData = process.env.APPDATA || path.join(HOME, "AppData", "Roaming");
+  const localAppData = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+  const extra = WIN
+    ? [path.join(appData, "npm", "codex.cmd"), path.join(localAppData, "Microsoft", "WinGet", "Links", "codex.exe"), path.join(HOME, ".local", "bin", "codex.exe")]
+    : [path.join(HOME, ".local", "bin", "codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex"];
+  for (const p of found.concat(extra)) {
+    if (!fs.existsSync(p)) continue;
+    if (WIN && /\.(cmd|bat|ps1)$/i.test(p)) {
+      const cli = path.join(path.dirname(p), "node_modules", "@openai", "codex", "bin", "codex.js");
+      if (fs.existsSync(cli)) return { command: process.execPath, args: [cli] };
+      continue;
+    }
+    if (WIN && !/\.exe$/i.test(p)) continue;
+    return { command: p, args: [] };
+  }
+  try {
+    const prev = JSON.parse(fs.readFileSync(path.join(INSTALL_DIR, "config.json"), "utf8")).codex;
     if (prev && prev.command && fs.existsSync(prev.command) && (prev.args || []).every((a) => fs.existsSync(a))) return prev;
   } catch { /* no earlier install */ }
   return null;
@@ -131,16 +161,21 @@ function uninstall() {
 }
 
 function install() {
-  // The game blocker works without Claude Code, so install anyway and say so.
+  // Either AI tool is enough. The game blocker works without one, so install
+  // anyway and say so.
   const claude = findClaude();
-  if (!claude) {
-    console.error("Couldn't find Claude Code, so hints won't work yet. Install it (https://claude.com/claude-code), run `claude` once to sign in, then run this again. Installing the game blocker anyway.");
+  const codex = findCodex();
+  if (!claude && !codex) {
+    console.error("Couldn't find Claude Code or Codex, so hints won't work yet. Install one of them, sign in, then run this again:");
+    console.error("  Claude Code (Claude plan): https://claude.com/claude-code, then run `claude` once to sign in.");
+    console.error("  Codex (ChatGPT plan): `npm install -g @openai/codex`, then run `codex login`.");
+    console.error("Installing the game blocker anyway.");
   }
   fs.mkdirSync(INSTALL_DIR, { recursive: true });
   for (const f of ["host.js", "gameguard.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(INSTALL_DIR, f));
   // Record this terminal's PATH (plus node's folder) for the bridge to reuse.
   const pathValue = [path.dirname(process.execPath), process.env.PATH].filter(Boolean).join(path.delimiter);
-  const config = { claude, path: pathValue };
+  const config = { claude, codex, path: pathValue };
   fs.writeFileSync(path.join(INSTALL_DIR, "config.json"), JSON.stringify(config, null, 2));
 
   // Firefox needs one executable to launch, so wrap node + host.js.
@@ -159,7 +194,7 @@ function install() {
   const manifestPath = path.join(dir, `${HOST_NAME}.json`);
   fs.writeFileSync(manifestPath, JSON.stringify({
     name: HOST_NAME,
-    description: "Lets LeetCode Daily Lock ask Claude Code for hints",
+    description: "Lets LeetCode Daily Lock ask Claude Code or Codex for hints",
     path: launcher,
     type: "stdio",
     allowed_extensions: [EXTENSION_ID]
@@ -168,25 +203,39 @@ function install() {
 
   console.log(`Installed. Firefox will run: ${launcher}`);
   if (claude) console.log(`Using Claude Code at: ${[claude.command, ...claude.args].join(" ")}`);
+  if (codex) console.log(`Using Codex at: ${[codex.command, ...codex.args].join(" ")}`);
   const g = setUpGuard();
   if (g.ok) console.log("Game blocker is running. Games stay closed until today's task is done (change the list in the extension settings).");
   else console.error("Couldn't set the game blocker to start with Windows. It still runs now, and the bridge restarts it while Firefox is open.");
   if (!g.admin) console.log("Tip: run this from an administrator terminal so the blocker can also close games that run as administrator, like the League client.");
 
-  if (!claude) { process.exitCode = 1; return; }
-  // Quick check that Claude Code runs and is signed in.
+  if (!claude && !codex) { process.exitCode = 1; return; }
+  // Quick check that each tool runs and is signed in.
   const { handle } = require(path.join(INSTALL_DIR, "host.js"));
-  console.log("Checking Claude Code (sends one tiny message)…");
-  handle({ type: "ask", system: "Reply with exactly: ready", prompt: "ping" }, config)
-    .then((r) => {
-      console.log(`Claude Code answered: ${r.text.trim().slice(0, 80)}`);
-      console.log("All set. In Firefox, open the extension settings and choose \"Claude Code on this computer\".");
-    })
-    .catch((e) => {
-      console.error(`The bridge is installed, but Claude Code didn't answer: ${e.message}`);
-      console.error("Run `claude` in a terminal, sign in with your Pro account, then try a hint again.");
-      process.exitCode = 1;
-    });
+  const tools = [
+    claude && { provider: "claude", name: "Claude Code", setting: "Claude Code (Claude plan)", fix: "Run `claude` in a terminal and sign in with your Claude account." },
+    codex && { provider: "codex", name: "Codex", setting: "ChatGPT through Codex (ChatGPT plan)", fix: "Run `codex login` in a terminal and sign in with your ChatGPT account." }
+  ].filter(Boolean);
+  (async () => {
+    const failed = [];
+    let working = 0;
+    for (const t of tools) {
+      console.log(`Checking ${t.name} (sends one tiny message)…`);
+      try {
+        const r = await handle({ type: "ask", provider: t.provider, system: "Reply with exactly: ready", prompt: "ping" }, config);
+        console.log(`${t.name} answered: ${r.text.trim().slice(0, 80)}`);
+        console.log(`All set. In Firefox, open the extension settings, choose "On this computer", and pick ${t.setting}.`);
+        working++;
+      } catch (e) {
+        failed.push({ t, e });
+      }
+    }
+    for (const { t, e } of failed) {
+      console.error(`${t.name} is installed but didn't answer: ${e.message}`);
+      console.error(working ? `${t.fix} (Skip this if you don't use ${t.name}.)` : `${t.fix} Then try a hint again.`);
+    }
+    if (!working) process.exitCode = 1;
+  })();
 }
 
 if (process.argv.includes("--uninstall")) uninstall();

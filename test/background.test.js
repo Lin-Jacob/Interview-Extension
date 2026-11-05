@@ -83,7 +83,7 @@ function makeEnv({ acToday = [], native = null, settings = { dailyGoal: 2, sched
   };
   const ctx = vm.createContext({ browser, fetch, console, URL, setTimeout: () => {}, Date, Math, JSON, Promise });
   ctx.globalThis = ctx;
-  for (const f of ["lib/topics.js", "lib/curriculum.js", "lib/core.js", "lib/leetcode.js", "lib/claude.js", "lib/share.js", "background.js"]) {
+  for (const f of ["lib/topics.js", "lib/curriculum.js", "lib/quizzes.js", "lib/prompts.js", "lib/core.js", "lib/leetcode.js", "lib/claude.js", "lib/share.js", "background.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   }
   const msg = async (m) => {
@@ -222,12 +222,16 @@ test("Claude Code mode: answers come back in the panel and the conversation resu
   const env = makeEnv({
     native: (m) => {
       if (m.type === "ping") return { ok: true, version: "2.1.300 (Claude Code)" };
+      if (m.type !== "ask") return { ok: true };
       if (m.sessionId && failResume) return { ok: false, error: "No conversation found with session ID: s1" };
       turn++;
       return { ok: true, text: `answer ${turn}`, sessionId: m.sessionId || `s${turn}` };
     }
   });
   assert.strictEqual((await env.msg({ type: "pingBridge" })).version, "2.1.300 (Claude Code)");
+  assert.strictEqual(env.nativeCalls[0].provider, "claude");
+  // Let the startup sync finish so it can't race the hint below.
+  for (let i = 0; i < 5; i++) await tick();
 
   let view = await env.msg({ type: "help", slug: "two-sum", kind: "hint", code: "x", language: "python3" });
   assert.strictEqual(view.hints, 1);
@@ -342,7 +346,11 @@ test("system design day: lesson, graded quiz, goal met, stats", async () => {
 
   view = await env.learn({ type: "generateLesson", id: "how-the-web-works" });
   assert.match(view.body, /DNS/);
-  assert.strictEqual(view.questions.length, 3);
+  // The quiz is the fixed one from lib/quizzes.js, not whatever the AI suggested.
+  assert.deepStrictEqual(view.questions, [...env.ctx.LESSON_QUIZZES["how-the-web-works"]]);
+  const lessonAsk = env.nativeCalls.find((c) => c.type === "ask");
+  assert.match(lessonAsk.prompt, /fixed quiz/);
+  assert.match(lessonAsk.prompt, /2\. A user says your site is slow/);
 
   view = await env.learn({ type: "gradeLesson", id: "how-the-web-works", answers: ["a", "b", "c"] });
   const grading = env.nativeCalls.filter((c) => c.type === "ask")[1];
@@ -392,7 +400,7 @@ test("system design lesson: Ask Claude chat keeps quiz answers back until gradin
   assert.match(call.system, /won't|don't give the answer/);
   assert.match(call.prompt, /^\[QUIZ NOT GRADED YET\]/);
   assert.match(call.prompt, /It resolves names/, "a new chat gets the lesson");
-  assert.match(call.prompt, /1\. Q1\?/);
+  assert.match(call.prompt, /1\. What happens, step by step/, "the chat knows the fixed quiz");
   assert.notStrictEqual(call.sessionId, "lesson-session", "chat is its own conversation, not the grading one");
   assert.strictEqual(r.chat.length, 2);
   assert.strictEqual(r.chat[0].text, "What is a resolver?");
@@ -473,9 +481,44 @@ test("behavioral grading: the slow Claude Code call runs from the page, then the
   assert.strictEqual(next.isToday, true);
 });
 
+test("ChatGPT (Codex) gets exactly the same prompts as Claude Code, with its own label", async () => {
+  const run = async (aiTool) => {
+    const env = makeEnv({
+      settings: { dailyGoal: 1, schedule: Array(7).fill("design"), aiTool },
+      native: learnNative((m) => m.prompt.includes("Write today's lesson") ? "```markdown\n# DNS\nIt resolves names.\n```"
+        : m.prompt.includes("Here are my answers") ? JSON.stringify({ results: [{ score: 5 }, { score: 5 }, { score: 5 }], summary: "ok" }) : "Chat reply")
+    });
+    const st = await env.msg({ type: "getState" });
+    assert.strictEqual(st.settings.aiTool, aiTool);
+    let view = await env.learn({ type: "generateLesson", id: "caching" });
+    assert.strictEqual(view.body, "# DNS\nIt resolves names.", "a fenced Markdown lesson is unwrapped");
+    assert.strictEqual(view.aiName, aiTool === "codex" ? "ChatGPT" : "Claude");
+    await env.learn({ type: "lessonChat", id: "caching", text: "What is LRU?" });
+    view = await env.learn({ type: "gradeLesson", id: "caching", answers: ["a", "b", "c"] });
+    assert.strictEqual(view.grade.score, 0.5);
+    const asks = env.nativeCalls.filter((c) => c.type === "ask");
+    assert.ok(asks.every((c) => c.provider === aiTool), "every call names the tool");
+    const session = await env.msg({ type: "getSession", slug: "two-sum" });
+    assert.strictEqual(session.aiName, aiTool === "codex" ? "ChatGPT" : "Claude");
+    return asks.map(({ system, prompt }) => ({ system, prompt }));
+  };
+  const claude = await run("claude");
+  const codex = await run("codex");
+  assert.strictEqual(claude.length, 3);
+  assert.deepStrictEqual(codex, claude);
+});
+
+test("the AI tool setting only takes claude or codex", async () => {
+  const env = makeEnv();
+  await env.msg({ type: "saveSettings", settings: { aiTool: "gemini" } });
+  assert.strictEqual((await env.msg({ type: "getState" })).settings.aiTool, "claude");
+  await env.msg({ type: "saveSettings", settings: { aiTool: "codex" } });
+  assert.strictEqual((await env.msg({ type: "getState" })).settings.aiTool, "codex");
+});
+
 test("lessons explain what to change in claude.ai mode", async () => {
   const env = makeEnv({ settings: { helpMode: "claudeai", schedule: Array(7).fill("design") } });
-  await assert.rejects(env.msg({ type: "generateLesson", id: "caching" }), /Claude Code on this computer/);
+  await assert.rejects(env.msg({ type: "generateLesson", id: "caching" }), /on this computer/);
 });
 
 test("LeetCode solves are logged for stats with hints", async () => {
