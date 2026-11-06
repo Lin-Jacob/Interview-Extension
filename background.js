@@ -59,10 +59,11 @@ function progressFrom(s) {
   const doneToday = (log) => Object.values(log || {}).flat().filter((e) => e.ts >= start).length;
   const designToday = doneToday(s.lessonLog);
   const behavioralToday = doneToday(s.behavioralLog);
-  const goal = type === "leetcode" ? Math.max(1, Number(s.settings.dailyGoal) || 1) : 1;
-  // SQL days need a database problem; LeetCode days count any accepted problem.
+  const goal = type === "leetcode" ? Math.max(1, Number(s.settings.dailyGoal) || 1) : type === "sql" ? 2 : 1;
+  // SQL days need a database problem plus one regular LeetCode problem;
+  // LeetCode days count any accepted problem.
   const count = type === "leetcode" ? solved.length
-    : type === "sql" ? solved.filter(Core.isSqlProblem).length
+    : type === "sql" ? Math.min(1, solved.filter(Core.isSqlProblem).length) + Math.min(1, solved.filter((x) => !Core.isSqlProblem(x)).length)
     : type === "design" ? designToday : behavioralToday;
   return { type, solved, designToday, behavioralToday, count, goal, done: count >= goal };
 }
@@ -169,7 +170,8 @@ function rampCapsFor(s, goal, keep) {
   return caps;
 }
 
-async function generatePicks(s, { keep = [], avoid = [] } = {}) {
+// `count` overrides the daily goal (SQL days add exactly one LeetCode problem).
+async function generatePicks(s, { keep = [], avoid = [], count = null } = {}) {
   const exclude = new Set([
     ...Object.keys(s.knownSolved), ...Object.keys(s.attempts), ...Object.keys(s.revealed), ...avoid,
     ...keep.map((p) => p.slug)
@@ -177,7 +179,7 @@ async function generatePicks(s, { keep = [], avoid = [] } = {}) {
   const strengths = strengthsFrom(s);
   const covered = Core.assessmentCoverage(s.attempts, s.assessment);
   const avoidTopics = s.daily && s.daily.picks && s.daily.date !== Core.dateKey() ? s.daily.picks.map((p) => p.topicId) : [];
-  const goal = Math.max(1, Number(s.settings.dailyGoal) || 2);
+  const goal = count || Math.max(1, Number(s.settings.dailyGoal) || 2);
   const knownSolved = { ...s.knownSolved };
   let picks = [];
   if (s.settings.rampUp && !s.rampStartedAt) {
@@ -223,6 +225,14 @@ async function generateSqlPicks(s, { avoid = [] } = {}) {
   return pick ? [pick] : [];
 }
 
+// A SQL day: the next SQL problem plus one LeetCode problem picked like on a
+// LeetCode day (weak topics, warm-up difficulty cap).
+async function sqlDayPicks(s) {
+  const sql = await generateSqlPicks(s);
+  const lc = await generatePicks(s, { count: 1, avoid: sql.map((p) => p.slug) });
+  return sql.concat(lc);
+}
+
 // Today's design lesson was picked as a review under older rules (e.g. a
 // failed lesson coming back after a week) and isn't due under the current ones.
 // If nothing has been graded today, give today's new pick instead.
@@ -236,12 +246,19 @@ function stalePickedReview(s, type) {
 async function ensureDaily() {
   const s = await load();
   const type = Core.taskTypeFor(Date.now(), s.settings.schedule);
-  if (s.daily && s.daily.date === Core.dateKey() && s.daily.type === type && !stalePickedReview(s, type)) return s.daily;
+  if (s.daily && s.daily.date === Core.dateKey() && s.daily.type === type && !stalePickedReview(s, type)) {
+    // SQL days from before 1.13 had no LeetCode problem: add one.
+    if (type !== "sql" || s.daily.picks.some((p) => !Core.isSqlProblem(p.slug))) return s.daily;
+    const sqlKeep = s.daily.picks.filter((p) => Core.isSqlProblem(p.slug));
+    const daily = { ...s.daily, picks: sqlKeep.concat(await generatePicks(s, { count: 1, avoid: sqlKeep.map((p) => p.slug) })) };
+    await save({ daily });
+    return daily;
+  }
   let daily;
   if (type === "leetcode") {
     daily = { date: Core.dateKey(), type, picks: await generatePicks(s) };
   } else if (type === "sql") {
-    daily = { date: Core.dateKey(), type, picks: await generateSqlPicks(s) };
+    daily = { date: Core.dateKey(), type, picks: await sqlDayPicks(s) };
   } else {
     const { item, review } = type === "design" ? Core.nextLesson(s.lessonLog) : Core.nextBehavioral(s.behavioralLog);
     // Keep yesterday's LeetCode topics so tomorrow's picks can avoid repeating them.
@@ -262,8 +279,15 @@ async function swapPick(slug) {
   if (!s.daily) return;
   if (!s.daily || !Core.isCodingType(s.daily.type)) return;
   if (s.daily.type === "sql") {
-    const picks = await generateSqlPicks(s, { avoid: [slug, ...s.daily.picks.map((p) => p.slug)] });
-    if (picks.length) await save({ daily: { ...s.daily, picks } });
+    const avoid = [slug, ...s.daily.picks.map((p) => p.slug)];
+    const others = s.daily.picks.filter((p) => p.slug !== slug);
+    const fresh = Core.isSqlProblem(slug)
+      ? await generateSqlPicks(s, { avoid })
+      : await generatePicks(s, { count: 1, avoid });
+    if (!fresh.length) return;
+    // SQL problem first, then the LeetCode one.
+    const picks = others.concat(fresh).sort((a, b) => Core.isSqlProblem(b.slug) - Core.isSqlProblem(a.slug));
+    await save({ daily: { ...s.daily, picks } });
     return;
   }
   const keep = s.daily.picks.filter((p) => p.slug !== slug);
