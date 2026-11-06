@@ -552,25 +552,45 @@ test("schedule settings are validated", async () => {
   assert.ok(!st.picks || st.picks.length === 0);
 });
 
-test("SQL day: one database problem; only SQL solves count; swap moves to the next", async () => {
-  const env = makeEnv({ settings: { dailyGoal: 2, schedule: Array(7).fill("sql") } });
+test("SQL day: one database problem plus one LeetCode problem; both must be solved", async () => {
+  const env = makeEnv({ settings: { dailyGoal: 3, schedule: Array(7).fill("sql") } });
   let st = await env.msg({ type: "getState" });
   assert.strictEqual(st.today.type, "sql");
-  assert.strictEqual(st.progress.goal, 1);
-  assert.deepStrictEqual(st.picks.map((p) => p.slug), ["recyclable-and-low-fat-products"]);
+  assert.strictEqual(st.progress.goal, 2);
+  assert.strictEqual(st.picks.length, 2, "one SQL + one LeetCode, whatever the daily goal");
+  assert.strictEqual(st.picks[0].slug, "recyclable-and-low-fat-products");
   assert.strictEqual(st.picks[0].topicName, "SQL & Databases");
+  const lc = st.picks[1];
+  assert.notStrictEqual(lc.topicId, "sql");
+  assert.strictEqual(lc.difficulty, "Easy", "warm-up day 1 is Easy only");
 
   st = await env.msg({ type: "swapPick", slug: "recyclable-and-low-fat-products" });
-  assert.deepStrictEqual(st.picks.map((p) => p.slug), ["find-customer-referee"]);
+  assert.deepStrictEqual(st.picks.map((p) => p.slug), ["find-customer-referee", lc.slug], "swapping the SQL problem keeps the LeetCode one");
+  st = await env.msg({ type: "swapPick", slug: lc.slug });
+  assert.strictEqual(st.picks[0].slug, "find-customer-referee");
+  assert.ok(st.picks[1].slug !== lc.slug && st.picks[1].topicId !== "sql", "swapping the LeetCode problem picks another one");
+  const lc2 = st.picks[1].slug;
 
-  await env.msg({ type: "accepted", slug: "two-sum" });
-  st = await env.msg({ type: "getState" });
-  assert.strictEqual(st.progress.done, false, "an algorithm problem doesn't finish a SQL day");
   await env.msg({ type: "accepted", slug: "find-customer-referee" });
+  await env.msg({ type: "accepted", slug: "big-countries" });
+  st = await env.msg({ type: "getState" });
+  assert.strictEqual(st.progress.count, 1, "two SQL solves still count once");
+  assert.strictEqual(st.progress.done, false, "the LeetCode problem is still owed");
+  await env.msg({ type: "accepted", slug: lc2 });
   st = await env.msg({ type: "getState" });
   assert.strictEqual(st.progress.done, true);
   const stats = await env.msg({ type: "getStats" });
-  assert.strictEqual(stats.totals.byTopic.sql, 1);
+  assert.strictEqual(stats.totals.byTopic.sql, 2);
+});
+
+test("a SQL day picked before 1.13 gets its LeetCode problem added", async () => {
+  const env = makeEnv({ settings: { dailyGoal: 2, schedule: Array(7).fill("sql") } });
+  let st = await env.msg({ type: "getState" });
+  env.store.daily = { ...env.store.daily, picks: env.store.daily.picks.slice(0, 1) };
+  st = await env.msg({ type: "getState" });
+  assert.strictEqual(st.picks.length, 2);
+  assert.strictEqual(st.picks[0].slug, "recyclable-and-low-fat-products");
+  assert.notStrictEqual(st.picks[1].topicId, "sql");
 });
 
 test("update to 1.5 turns Friday into SQL only for the old default schedule", async () => {

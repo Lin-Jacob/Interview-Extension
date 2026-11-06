@@ -87,8 +87,10 @@ into, and **API key** answers in the panel and is billed per use.
 ## How it works
 - **Daily rotation:** one task a day, set per weekday in settings. Default: LeetCode on Sun, Mon and Wed;
   system design on Tue and Thu; SQL on Fri; behavioral on Sat. Extra practice is always optional.
-- **SQL days:** one problem a day from LeetCode's Top SQL 50 study plan, in order (Select, joins,
-  aggregates, grouping, subqueries, string functions). The Ask Claude tutor works on them too.
+- **SQL days:** the next problem from LeetCode's Top SQL 50 study plan, in order (Select, joins,
+  aggregates, grouping, subqueries, string functions), plus one regular LeetCode problem picked the
+  same way as on LeetCode days (weak topics, warm-up difficulty). Both must be solved. The Ask Claude
+  tutor works on them too.
 - **System design lessons:** 49 lessons in order, from how the web works through caching, databases,
   SQL, schema design, query performance, queues and consistency to case studies (URL shortener, chat, news feed, payments) and team practices.
   Claude writes each one as a short 2–3 minute reading with 3 quiz questions; you type answers and Claude grades them.
