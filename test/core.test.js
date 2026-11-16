@@ -158,6 +158,26 @@ test("when every Easy is used up, the ramp steps up one level instead of skippin
   assert.deepStrictEqual(picks.map((p) => p.difficulty), ["Medium", "Medium"]);
 });
 
+test("a Medium ramp slot moves to the next weak topic instead of giving an Easy", () => {
+  const strengths = Core.topicStrengths({}, {});
+  const done = { startedAt: 0, completedAt: 1 };
+  const weakest = strengths.slice().sort((a, b) => a.strength - b.strength)[0].id;
+  const topic = TOPICS.find((t) => t.id === weakest);
+  // The weakest topic's Mediums are all solved already; its Easys are not.
+  const exclude = new Set(topic.problems.filter((p) => p[1] === "Medium").map((p) => p[0]));
+  const [pick] = Core.pickDaily({ strengths, assessment: done, exclude, count: 1, caps: ["Medium"] });
+  assert.strictEqual(pick.difficulty, "Medium");
+  assert.notStrictEqual(pick.topicId, weakest);
+});
+
+test("a Medium ramp slot falls back to Easy only when no Medium is left anywhere", () => {
+  const strengths = Core.topicStrengths({}, {});
+  const done = { startedAt: 0, completedAt: 1 };
+  const noMediumOrHard = new Set(TOPICS.flatMap((t) => t.problems.filter((p) => p[1] !== "Easy").map((p) => p[0])));
+  const picks = Core.pickDaily({ strengths, assessment: done, exclude: noMediumOrHard, count: 1, caps: ["Medium"] });
+  assert.deepStrictEqual(picks.map((p) => p.difficulty), ["Easy"]);
+});
+
 test("weekday schedule picks the task type, falling back to LeetCode", () => {
   const tue = new Date(2026, 9, 13, 9).getTime(); // a Tuesday
   assert.strictEqual(Core.taskTypeFor(tue, Core.DEFAULT_SETTINGS.schedule), "design");
