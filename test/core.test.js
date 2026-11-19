@@ -289,3 +289,35 @@ test("lesson prompt carries the fixed quiz and asks for Markdown only", () => {
   assert.match(p, /1\. A\?\n2\. B\?/);
   assert.match(p, /only the lesson in Markdown/);
 });
+
+test("the day rolls over at 5 AM, not midnight", () => {
+  assert.strictEqual(Core.getDayStartHour(), 5);
+  const late = new Date(2026, 10, 19, 4, 59).getTime(); // Thu 4:59 AM
+  const early = new Date(2026, 10, 19, 5, 0).getTime(); // Thu 5:00 AM
+  assert.strictEqual(Core.dateKey(late), "2026-11-18");
+  assert.strictEqual(Core.dateKey(early), "2026-11-19");
+  assert.strictEqual(Core.weekday(late), 3, "still Wednesday");
+  assert.strictEqual(Core.taskTypeFor(late, ["a", "b", "design", "leetcode", "x", "x", "x"]), "leetcode");
+  assert.strictEqual(Core.startOfDay(late), new Date(2026, 10, 18, 5).getTime());
+  assert.strictEqual(Core.startOfDay(early), early);
+  assert.strictEqual(Core.nextDayStart(late), early);
+  // A solve at 1 AM counts for the day before.
+  const solved = Core.solvedTodaySlugs({ localAccepts: { "two-sum": new Date(2026, 10, 19, 1).getTime() }, now: late });
+  assert.deepStrictEqual(solved, ["two-sum"]);
+  assert.deepStrictEqual(Core.solvedTodaySlugs({ localAccepts: { "two-sum": new Date(2026, 10, 19, 1).getTime() }, now: early }), []);
+  // Streaks follow the shifted day.
+  assert.deepStrictEqual(Core.streaks({ "2026-11-17": "leetcode" }, late), { current: 1, longest: 1 });
+});
+
+test("day start hour can be changed and is clamped", () => {
+  try {
+    assert.strictEqual(Core.setDayStartHour(0), 0);
+    assert.strictEqual(Core.dateKey(new Date(2026, 10, 19, 1).getTime()), "2026-11-19");
+    assert.strictEqual(Core.setDayStartHour("nonsense"), 5);
+    assert.strictEqual(Core.setDayStartHour(30), 5);
+    assert.strictEqual(Core.setDayStartHour(23), 23);
+    assert.strictEqual(Core.dateKey(new Date(2026, 10, 19, 22).getTime()), "2026-11-18");
+  } finally {
+    Core.setDayStartHour(5);
+  }
+});

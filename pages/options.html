@@ -26,6 +26,10 @@
         <span class="hint" style="display:block;font-weight:400;color:var(--muted);font-size:12px">Each day has one task. Sites unlock once it's done.</span>
         <div id="schedule" class="row" style="margin-top:6px"></div>
       </div>
+      <label class="field">New day starts at
+        <select id="dayStartHour"></select>
+      </label>
+      <p class="small muted" style="margin:4px 0 0 0">Today's task, the goal, blocking and streaks all roll over at this time. Before it, it still counts as the day before.</p>
       <label class="field">LeetCode problems on LeetCode days
         <input type="number" id="dailyGoal" min="1" max="10">
       </label>

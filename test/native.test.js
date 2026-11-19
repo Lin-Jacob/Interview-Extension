@@ -215,6 +215,15 @@ test("games are allowed only after today's task is reported done, or with blocki
   assert.strictEqual(guard.gamesAllowed({ date: "2026-10-26", done: false, enabled: false }, now), true);
 });
 
+test("the game blocker's day starts at the extension's start hour", () => {
+  const night = new Date(2026, 9, 28, 2).getTime(); // 2 AM on the 28th
+  assert.strictEqual(guard.dateKey(night, 5), "2026-10-27");
+  assert.strictEqual(guard.dateKey(night), "2026-10-28", "midnight without an hour");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", dayStartHour: 5, done: true }, night), true, "yesterday's task still counts before 5 AM");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", dayStartHour: 5, done: true }, new Date(2026, 9, 28, 5).getTime()), false, "a new day at 5 AM");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", done: true }, night), false, "old reports use midnight");
+});
+
 test("game rules match program names and install folders", () => {
   const rules = guard.compileRules(guard.DEFAULT_GAMES.concat(["minecraft", "D:/Games/"]));
   const m = (name, p = "") => guard.matches({ name, path: p }, rules);
@@ -312,10 +321,10 @@ test("bridge saves the game report and starts the blocker", { skip: process.plat
   for (const f of [HOST_JS, GUARD_JS]) fs.copyFileSync(f, path.join(dir, path.basename(f)));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-home-"));
   const run = (msg) => unframe(spawnSync(process.execPath, [path.join(dir, "host.js")], { input: frame(msg), env: { ...process.env, HOME: home } }).stdout);
-  const out = run({ type: "games", date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"] });
+  const out = run({ type: "games", date: "2026-10-27", dayStartHour: 5, done: false, enabled: true, processes: ["steam.exe"] });
   assert.deepStrictEqual(out, { ok: true, guard: "started" });
   const state = readJson(path.join(home, ".leetcode-daily-lock", "games.json"));
-  assert.deepStrictEqual({ ...state, updatedAt: 0 }, { date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"], updatedAt: 0 });
+  assert.deepStrictEqual({ ...state, updatedAt: 0 }, { date: "2026-10-27", dayStartHour: 5, done: false, enabled: true, processes: ["steam.exe"], updatedAt: 0 });
   const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
   try {
     assert.ok(hb && alive(hb.pid));

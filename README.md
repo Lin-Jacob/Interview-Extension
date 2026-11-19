@@ -1,6 +1,6 @@
 # LeetCode Daily Lock (Firefox)
 
-Blocks distracting sites every day until today's prep task is done. Most days that's one LeetCode
+Blocks distracting sites every day (the day starts at 5 AM, changeable in settings) until today's prep task is done. Most days that's one LeetCode
 problem from your weakest topics; other days it's a short system design lesson with a graded quiz, or a
 behavioral interview question with feedback. Adds an "Ask Claude" tutor on every problem page and a
 stats page to track your streak.
@@ -50,12 +50,12 @@ The bridge install also sets up a small background program (`gameguard.js`) that
 launchers until today's task is done. By default it closes Steam, Epic Games Launcher, the Riot Client,
 League of Legends and VALORANT, plus anything installed under `\steamapps\common\`, `\Epic Games\`
 or `\Riot Games\`. Edit the list or turn it off in the extension settings (a program name like
-`minecraft.exe`, or a folder). A game that's already open when blocking starts (at midnight, or when you install or turn it on)
+`minecraft.exe`, or a folder). A game that's already open when blocking starts (when a new day starts, or when you install or turn it on)
 keeps running until you close it, including a match it starts from its own folder, like League from its
 client. Opening anything new gets it closed, and that includes a game started from a Steam window that was
 already open. It checks every 10 seconds, starts when you sign in to Windows, and Task
 Scheduler restarts it every 5 minutes if it's closed. Firefox tells it about your progress through the
-bridge, so on a day Firefox hasn't reported the task as done, games stay closed. At midnight a new day
+bridge, so on a day Firefox hasn't reported the task as done, games stay closed. At 5 AM (or the "New day starts at" hour in settings) a new day
 starts and games close again until that day's task is done. Each time it closes a game, Firefox opens a page that names the game and lists today's task (at most once a
 minute). The extension opens that tab itself through the bridge, so it lands in the Firefox profile you use. A log of what it closed is in
 `~/.leetcode-daily-lock/gameguard.log`. It isn't tamper-proof: deleting the scheduled task or

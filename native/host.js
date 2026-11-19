@@ -89,6 +89,7 @@ function reportGames(msg) {
   const guard = require(path.join(__dirname, "gameguard.js"));
   const state = {
     date: String(msg.date || ""),
+    dayStartHour: Number(msg.dayStartHour) || 0,
     done: !!msg.done,
     enabled: msg.enabled !== false,
     processes: Array.isArray(msg.processes) ? msg.processes.map(String) : guard.DEFAULT_GAMES,
