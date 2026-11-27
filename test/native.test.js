@@ -206,6 +206,26 @@ test("installer registers the host for Firefox and uninstalls cleanly", { skip: 
   assert.ok(!fs.existsSync(path.join(home, ".leetcode-daily-lock", "bridge")));
 });
 
+test("the repo-root install.js installs the bridge from native/", { skip: process.platform === "win32" }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-root-"));
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-bin-"));
+  fakeClaude(bin, { result: "ready" });
+  const env = { ...process.env, HOME: home, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` };
+  const root = path.join(__dirname, "..");
+  const r = spawnSync(process.execPath, ["install.js"], { cwd: root, env, encoding: "utf8" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Claude Code answered: ready/);
+  const dir = path.join(home, ".leetcode-daily-lock", "bridge");
+  for (const f of ["host.js", "gameguard.js"]) {
+    assert.strictEqual(fs.readFileSync(path.join(dir, f), "utf8"), fs.readFileSync(path.join(root, "native", f), "utf8"));
+  }
+  const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
+  const u = spawnSync(process.execPath, ["install.js", "--uninstall"], { cwd: root, env, encoding: "utf8" });
+  assert.strictEqual(u.status, 0);
+  if (hb) assert.ok(waitFor(() => !alive(hb.pid)), "uninstall stops the game blocker");
+  assert.ok(!fs.existsSync(dir));
+});
+
 test("games are allowed only after today's task is reported done, or with blocking off", () => {
   const now = new Date(2026, 9, 27, 15).getTime();
   assert.strictEqual(guard.gamesAllowed(null, now), false);
