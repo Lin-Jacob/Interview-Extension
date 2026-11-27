@@ -31,8 +31,12 @@ and the answer shows up in the extension.
 1. Install one of them and sign in:
    - **Claude Code** (Claude Pro or Max): install from https://claude.com/claude-code, run `claude` once and sign in.
    - **Codex** (ChatGPT Plus or Pro): `npm install -g @openai/codex`, then `codex login` and sign in with ChatGPT.
-2. Unzip `leetcode-daily-lock-bridge.zip` anywhere and run `node install.js` inside it (Node.js 18+).
+2. Get the repo (`git clone https://github.com/Lin-Jacob/Interview-Extension`) and run `node install.js` in its
+   root folder (Node.js 18+). On Windows, use an administrator terminal so the game blocker can also close
+   games that run as administrator, like the League client.
    It finds Claude Code and/or Codex, registers the bridge with Firefox for your user only, and sends one tiny test message.
+   To update the bridge later, `git pull` and run `node install.js` again.
+   (No git? Unzip `leetcode-daily-lock-bridge.zip` from the latest release and run `node install.js` inside it instead.)
 3. Restart Firefox. In the extension settings, keep "On this computer" selected, pick your AI tool, and click **Test connection**.
 
 Both tools get exactly the same prompts (all of them live in `lib/prompts.js`), and the practice itself
