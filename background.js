@@ -34,7 +34,10 @@ async function load(keys = Object.keys(STORAGE_DEFAULTS)) {
   const defaults = {};
   for (const k of keys) defaults[k] = STORAGE_DEFAULTS[k];
   const data = await browser.storage.local.get(defaults);
-  data.settings && (data.settings = { ...Core.DEFAULT_SETTINGS, ...data.settings });
+  if (data.settings) {
+    data.settings = { ...Core.DEFAULT_SETTINGS, ...data.settings };
+    Core.setDayStartHour(data.settings.dayStartHour);
+  }
   return data;
 }
 
@@ -247,7 +250,7 @@ async function ensureDaily() {
   const s = await load();
   const type = Core.taskTypeFor(Date.now(), s.settings.schedule);
   if (s.daily && s.daily.date === Core.dateKey() && s.daily.type === type && !stalePickedReview(s, type)) {
-    // SQL days from before 1.13 had no LeetCode problem: add one.
+    // SQL days from before 1.15 had no LeetCode problem: add one.
     if (type !== "sql" || s.daily.picks.some((p) => !Core.isSqlProblem(p.slug))) return s.daily;
     const sqlKeep = s.daily.picks.filter((p) => Core.isSqlProblem(p.slug));
     const daily = { ...s.daily, picks: sqlKeep.concat(await generatePicks(s, { count: 1, avoid: sqlKeep.map((p) => p.slug) })) };
@@ -391,7 +394,7 @@ async function reportGames(settings, p, last) {
   if (!enabled && !(last && last.enabled)) return;
   const report = { at: Date.now(), enabled, done: p.done };
   try {
-    const r = await nativeCall({ type: "games", date: Core.dateKey(), done: p.done, enabled, processes: Core.parseGameList(settings.blockedGames) });
+    const r = await nativeCall({ type: "games", date: Core.dateKey(), dayStartHour: Core.getDayStartHour(), done: p.done, enabled, processes: Core.parseGameList(settings.blockedGames) });
     report.guard = r.guard || "";
   } catch (e) {
     report.error = e.message;
@@ -932,6 +935,7 @@ async function saveSettings(patch) {
   if (!["claudeai", "claudecode", "api"].includes(settings.helpMode)) settings.helpMode = "claudecode";
   settings.aiTool = aiTool(settings);
   settings.dailyGoal = Math.min(10, Math.max(1, Number(settings.dailyGoal) || 1));
+  settings.dayStartHour = Core.setDayStartHour(settings.dayStartHour);
   if (!Array.isArray(settings.schedule) || settings.schedule.length !== 7) settings.schedule = Core.DEFAULT_SETTINGS.schedule;
   settings.schedule = settings.schedule.map((t) => (Core.TASK_TYPES.includes(t) ? t : "leetcode"));
   const scheduleChanged = JSON.stringify(settings.schedule) !== JSON.stringify(s.settings.schedule);
@@ -940,7 +944,7 @@ async function saveSettings(patch) {
   settings.hintsBeforeSolution = Math.min(10, Math.max(1, Number(settings.hintsBeforeSolution) || 5));
   const usernameChanged = patch.username !== undefined && patch.username !== s.settings.username;
   const rampChanged = patch.rampUp !== undefined && !!patch.rampUp !== !!s.settings.rampUp;
-  const goalChanged = settings.dailyGoal !== s.settings.dailyGoal;
+  const goalChanged = settings.dailyGoal !== s.settings.dailyGoal || settings.dayStartHour !== s.settings.dayStartHour;
   await save({ settings });
   // New dashboard login details: send right away on the next state change.
   if (["shareName", "shareUrl", "sharePassword"].some((k) => patch[k] !== undefined && patch[k] !== s.settings[k])) await save({ share: STORAGE_DEFAULTS.share });
@@ -1017,6 +1021,11 @@ browser.runtime.onInstalled.addListener(async ({ reason }) => {
     await save({ assessment: { startedAt: Date.now(), completedAt: null } });
     browser.runtime.openOptionsPage();
   }
+});
+
+// Keep the day's start hour current for code that runs before the next load().
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.settings && changes.settings.newValue) Core.setDayStartHour(changes.settings.newValue.dayStartHour);
 });
 
 browser.alarms.create(SYNC_ALARM, { periodInMinutes: 5 });

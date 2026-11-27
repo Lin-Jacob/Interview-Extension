@@ -32,9 +32,18 @@ const DEFAULT_GAMES = [
 ];
 
 function pad(n) { return String(n).padStart(2, "0"); }
-function dateKey(now = Date.now()) {
+// The extension's day starts at its "New day starts at" hour (5 AM by
+// default), sent with each report; before that hour it is still yesterday.
+// Same rule as Core.dateKey in lib/core.js.
+function dateKey(now = Date.now(), dayStartHour = 0) {
   const d = new Date(now);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+  if (d.getHours() < dayStartHour) day.setDate(day.getDate() - 1);
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+}
+function startHour(state) {
+  const h = Math.floor(Number(state && state.dayStartHour));
+  return h >= 0 && h <= 23 ? h : 0; // reports from extensions before 1.14 used midnight
 }
 
 function readJson(p, fallback) {
@@ -46,7 +55,7 @@ function readJson(p, fallback) {
 function gamesAllowed(state, now = Date.now()) {
   if (!state) return false;
   if (state.enabled === false) return true;
-  return state.date === dateKey(now) && !!state.done;
+  return state.date === dateKey(now, startHour(state)) && !!state.done;
 }
 
 const stripExe = (s) => s.toLowerCase().replace(/\.exe$/, "");
@@ -135,7 +144,7 @@ function partOfGame(child, parent) {
 }
 
 // One pass: closes matching programs unless games are allowed right now.
-// Games already open when blocking starts (at midnight, when it's turned on,
+// Games already open when blocking starts (when the day rolls over, when it's turned on,
 // or when the blocker is installed) keep running until closed; anything
 // opened after that is closed. Returns the processes it closed.
 async function checkOnce({ state = readJson(STATE_PATH, null), now = Date.now(), sessionPath = SESSION_PATH, onClosed = showTask } = {}) {

@@ -48,6 +48,9 @@ function fill(st) {
   $("username").value = s.username || "";
   $("username").placeholder = st.username ? `Signed in as ${st.username}` : "";
   $("dailyGoal").value = s.dailyGoal;
+  const hourLabel = (h) => (h === 0 ? "12 AM (midnight)" : h === 12 ? "12 PM (noon)" : h < 12 ? `${h} AM` : `${h - 12} PM`);
+  $("dayStartHour").replaceChildren(...Array.from({ length: 24 }, (_, h) => el("option", { value: String(h) }, hourLabel(h))));
+  $("dayStartHour").value = String(s.dayStartHour ?? 5);
   $("blockedSites").value = (s.blockedSites || []).join("\n");
   $("blockGames").checked = !!s.blockGames;
   $("blockedGames").value = (s.blockedGames || []).join("\n");
@@ -88,6 +91,7 @@ $("form").addEventListener("submit", async (e) => {
   const settings = {
     username: $("username").value.trim(),
     dailyGoal: Number($("dailyGoal").value),
+    dayStartHour: Number($("dayStartHour").value),
     schedule: DAYS.map((_, i) => $(`day${i}`).value),
     blockedSites: $("blockedSites").value,
     blockGames: $("blockGames").checked,

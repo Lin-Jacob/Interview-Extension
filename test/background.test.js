@@ -583,7 +583,7 @@ test("SQL day: one database problem plus one LeetCode problem; both must be solv
   assert.strictEqual(stats.totals.byTopic.sql, 2);
 });
 
-test("a SQL day picked before 1.13 gets its LeetCode problem added", async () => {
+test("a SQL day picked before 1.15 gets its LeetCode problem added", async () => {
   const env = makeEnv({ settings: { dailyGoal: 2, schedule: Array(7).fill("sql") } });
   let st = await env.msg({ type: "getState" });
   env.store.daily = { ...env.store.daily, picks: env.store.daily.picks.slice(0, 1) };

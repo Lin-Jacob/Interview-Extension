@@ -206,6 +206,26 @@ test("installer registers the host for Firefox and uninstalls cleanly", { skip: 
   assert.ok(!fs.existsSync(path.join(home, ".leetcode-daily-lock", "bridge")));
 });
 
+test("the repo-root install.js installs the bridge from native/", { skip: process.platform === "win32" }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-root-"));
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-bin-"));
+  fakeClaude(bin, { result: "ready" });
+  const env = { ...process.env, HOME: home, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` };
+  const root = path.join(__dirname, "..");
+  const r = spawnSync(process.execPath, ["install.js"], { cwd: root, env, encoding: "utf8" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Claude Code answered: ready/);
+  const dir = path.join(home, ".leetcode-daily-lock", "bridge");
+  for (const f of ["host.js", "gameguard.js"]) {
+    assert.strictEqual(fs.readFileSync(path.join(dir, f), "utf8"), fs.readFileSync(path.join(root, "native", f), "utf8"));
+  }
+  const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
+  const u = spawnSync(process.execPath, ["install.js", "--uninstall"], { cwd: root, env, encoding: "utf8" });
+  assert.strictEqual(u.status, 0);
+  if (hb) assert.ok(waitFor(() => !alive(hb.pid)), "uninstall stops the game blocker");
+  assert.ok(!fs.existsSync(dir));
+});
+
 test("games are allowed only after today's task is reported done, or with blocking off", () => {
   const now = new Date(2026, 9, 27, 15).getTime();
   assert.strictEqual(guard.gamesAllowed(null, now), false);
@@ -213,6 +233,15 @@ test("games are allowed only after today's task is reported done, or with blocki
   assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", done: true }, now), true);
   assert.strictEqual(guard.gamesAllowed({ date: "2026-10-26", done: true }, now), false, "yesterday's report doesn't count");
   assert.strictEqual(guard.gamesAllowed({ date: "2026-10-26", done: false, enabled: false }, now), true);
+});
+
+test("the game blocker's day starts at the extension's start hour", () => {
+  const night = new Date(2026, 9, 28, 2).getTime(); // 2 AM on the 28th
+  assert.strictEqual(guard.dateKey(night, 5), "2026-10-27");
+  assert.strictEqual(guard.dateKey(night), "2026-10-28", "midnight without an hour");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", dayStartHour: 5, done: true }, night), true, "yesterday's task still counts before 5 AM");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", dayStartHour: 5, done: true }, new Date(2026, 9, 28, 5).getTime()), false, "a new day at 5 AM");
+  assert.strictEqual(guard.gamesAllowed({ date: "2026-10-27", done: true }, night), false, "old reports use midnight");
 });
 
 test("game rules match program names and install folders", () => {
@@ -312,10 +341,10 @@ test("bridge saves the game report and starts the blocker", { skip: process.plat
   for (const f of [HOST_JS, GUARD_JS]) fs.copyFileSync(f, path.join(dir, path.basename(f)));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "lcdl-home-"));
   const run = (msg) => unframe(spawnSync(process.execPath, [path.join(dir, "host.js")], { input: frame(msg), env: { ...process.env, HOME: home } }).stdout);
-  const out = run({ type: "games", date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"] });
+  const out = run({ type: "games", date: "2026-10-27", dayStartHour: 5, done: false, enabled: true, processes: ["steam.exe"] });
   assert.deepStrictEqual(out, { ok: true, guard: "started" });
   const state = readJson(path.join(home, ".leetcode-daily-lock", "games.json"));
-  assert.deepStrictEqual({ ...state, updatedAt: 0 }, { date: "2026-10-27", done: false, enabled: true, processes: ["steam.exe"], updatedAt: 0 });
+  assert.deepStrictEqual({ ...state, updatedAt: 0 }, { date: "2026-10-27", dayStartHour: 5, done: false, enabled: true, processes: ["steam.exe"], updatedAt: 0 });
   const hb = waitFor(() => readJson(path.join(home, ".leetcode-daily-lock", "gameguard.json")));
   try {
     assert.ok(hb && alive(hb.pid));
